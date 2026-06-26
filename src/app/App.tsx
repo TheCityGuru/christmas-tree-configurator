@@ -611,8 +611,12 @@ export default function App() {
   // then a global hard fallback. As real product variants are authored, drop them into treeVariantModels;
   // unmapped combos quietly fall back to the tree's default model so the UI never blanks out.
   const treeVariantModels: Record<string, string> = {
+    '1-120cm-olive': '/models/trees/fishboneTree_green120.glb',
+    '1-120cm-mix':   '/models/trees/fishboneTree_twotone120.glb',
     '1-150cm-olive': '/models/trees/fishboneTree_green150.glb',
     '1-150cm-mix':   '/models/trees/fishboneTree_twotone150.glb',
+    '1-180cm-olive': '/models/trees/fishboneTree_green180.glb',
+    '1-180cm-mix':   '/models/trees/fishboneTree_twotone180.glb',
     '3-150cm-olive': '/models/trees/sketchTree_olive150.glb',
     '3-180cm-olive': '/models/trees/sketchTree_olive180.glb',
     '3-180cm-snow':  '/models/trees/sketchTree_white180.glb',

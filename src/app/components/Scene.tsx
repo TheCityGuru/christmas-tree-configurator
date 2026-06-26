@@ -687,14 +687,25 @@ export default function Scene({
   useEffect(() => {
     if (!treeModelPath) return;
     const treeGroup = treeGroupRef.current;
+    console.info('[tree] effect fired for:', treeModelPath);
 
     // Clear any previous fade timer and show loading bar
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
     setLoadProgress(0);
 
+    // Stale-callback guard: GLB loads are async + uncached on first hit, cached on subsequent.
+    // When user toggles model A → B → A, browser cache makes the second A load complete first
+    // while B is still inflight. Without this flag, B's callback then overwrites A in scene.
+    let cancelled = false;
     gltfLoader.load(
       treeModelPath,
       (gltf) => {
+        if (cancelled) {
+          console.info('[tree] load cancelled for:', treeModelPath);
+          disposeGroup(gltf.scene);
+          return;
+        }
+        console.info('[tree] load applied for:', treeModelPath);
         // Briefly show 100% then fade out
         setLoadProgress(100);
         fadeTimerRef.current = setTimeout(() => setLoadProgress(null), 400);
@@ -1026,6 +1037,24 @@ export default function Scene({
           }
         });
 
+        // Tag foliage materials ONCE at load time so the treeColor effect can find them
+        // by intent rather than by current hue. Without this, switching to a non-greenish
+        // color (e.g. 스노우 white) drops the material out of the hue gate, and the next
+        // color change has nothing to recolor → tree stays the previous color forever.
+        const hsl = { h: 0, s: 0, l: 0 };
+        model.traverse((child) => {
+          if (!(child as THREE.Mesh).isMesh) return;
+          const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
+          const mats = Array.isArray(mat) ? mat : [mat];
+          mats.forEach((m) => {
+            if (!m?.color) return;
+            m.color.getHSL(hsl);
+            if (hsl.h > 0.2 && hsl.h < 0.45) {
+              m.userData.isFoliage = true;
+            }
+          });
+        });
+
         treeGroup.add(model);
         loadedModelRef.current = model;
         setTreeReady((n) => n + 1); // signal ornament effect to re-run
@@ -1038,10 +1067,12 @@ export default function Scene({
         }
       },
       (error) => {
+        if (cancelled) return;
         console.error('Failed to load tree model:', error);
         setLoadProgress(null);
       },
     );
+    return () => { cancelled = true; };
   }, [treeModelPath]);
 
   // ---- Emissive lights scatter (Tree 1 / Tree 4, ultimate_tree_v2 family) ----
@@ -1072,31 +1103,26 @@ export default function Scene({
     // Aggregate count drives the global oversample/safety budget (clusters/PER_BRANCH math).
     const totalLightCount = renderableLayers.reduce((s, l) => s + l.bulbCount, 0);
 
-    // Same scatter algorithm as before — vertex direction + height-gradient push + jitter
-    // Defaults tuned for ultimate_tree_v2 dimensions. sketchTree gets bounds-derived params below.
-    let BASE_R = 0.5232; // +9% (was 0.48) — pushes lights toward outer foliage
-    let TIP_R  = 0.109;  // +9% (was 0.10)
-    let Y_BASE = 0.30;
-    let Y_TIP  = 1.40;
-    const JITTER = 0.015;
-    // ultimate_tree_v2: needle clusters live on `branchNNN3` (3-suffix sub-mesh).
-    // sketchTree: scatter on any `sketchBranch*` (covers `sketchBranch`, `sketchBranch.001`,
-    // and the runtime-cloned `sketchBranch.001_rot_0/1/2` from the quadrant-clone block).
-    const cube022Re = isUltimate
-      ? /^branch(?:\d{3})?3$/
+    // Cluster discovery regex per family:
+    //   - ultimate/fishbone: needle clusters live on `branchNNN3` (nested .3 sub-mesh)
+    //     OR `Cube022` / `Cube022_N` (when the Blender source has Cube.022 at top level
+    //     instead of nested — as in the fishboneTree_twotone* variants).
+    //     Note: Three.js GLTFLoader STRIPS DOTS from node names, so `branch.001.3` →
+    //     `branch0013` and `Cube.022_1` → `Cube022_1`.
+    //   - sketch: scatter on any `sketchBranch*` (parent may be a Group → walk into descendants)
+    const clusterRe = isUltimate
+      ? /^(?:branch(?:\d{3})?3|Cube022(?:_\d+)?)$/
       : /^sketchBranch/;
     model.updateMatrixWorld(true);
     const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
 
     // First pass: collect all matching needle clusters so we can size PER_BRANCH dynamically.
-    // ultimate_tree_v2: direct match (branch nodes ARE meshes).
-    // sketchTree: parent `sketchBranch[.NNN]` may be a Group; walk into matched parents
-    // and collect ALL descendant meshes (handles both Mesh and Group cases).
     const clusters: THREE.Mesh[] = [];
     if (isSketch) {
+      // sketchTree: parent may be a Group; walk into matched parents + collect descendant meshes.
       const matchedParents: THREE.Object3D[] = [];
       model.traverse((child) => {
-        if (cube022Re.test(child.name)) matchedParents.push(child);
+        if (clusterRe.test(child.name)) matchedParents.push(child);
       });
       matchedParents.forEach((parent) => {
         parent.traverse((descendant) => {
@@ -1104,30 +1130,72 @@ export default function Scene({
         });
       });
     } else {
+      // ultimate/fishbone: branchNNN3 IS a Mesh, direct match.
       model.traverse((child) => {
         if (!(child instanceof THREE.Mesh)) return;
-        if (!cube022Re.test(child.name)) return;
+        if (!clusterRe.test(child.name)) return;
         clusters.push(child);
       });
     }
-    // Diagnostic (remove once verified): log cluster discovery for new trees
-    if (isSketch) {
-      console.info('[sketchTree lights] clusters found:', clusters.length, clusters.slice(0, 5).map((c) => c.name));
-    }
     if (clusters.length === 0) return;
 
-    // For sketchTree: derive scatter bounds from the actual cluster AABB so proportions adapt.
-    // Computed in model-local space (same space as the scatter math below).
-    // Hard caps applied to keep lights INSIDE the visible foliage silhouette:
-    // - Y range trimmed to the middle 90% of geometry height (skip wispy tip + low spread)
-    // - BASE_R / TIP_R tightened (cone narrower than full AABB radius)
-    let sketchYMinKeep = -Infinity;
-    let sketchYMaxKeep = Infinity;
-    let sketchMaxR = Infinity;
-    if (isSketch) {
-      const bbox = new THREE.Box3();
-      const tmpBox = new THREE.Box3();
-      const toModelM = new THREE.Matrix4();
+    // Bounds-derived scatter shape — auto-adapts to any tree size (120/150/180/210).
+    //
+    // Critical: the BBOX SOURCE differs by family because the geometry/foliage relationship
+    // is fundamentally different:
+    //   - sketchTree: cluster meshes ARE the visible foliage → cluster bbox is correct
+    //   - fishboneTree: cluster meshes (`branchNNN3`) are JUST the needle armature, the
+    //     visible alpha-textured foliage (PE_bunch / PE) extends well beyond them. Using
+    //     cluster bbox here buries lights inside the geometry (original bug pre-2026-06-17).
+    //     Use the FULL model bbox (minus the metal Stand) to capture visible foliage extent.
+    //
+    // Percentages then differ accordingly:
+    //   - fishbone: BASE_R PUSHES past foliage (>100% × maxR) since maxR ≈ visible edge
+    //   - sketch:   BASE_R STAYS WITHIN cluster bbox (<100% × maxR) since maxR ≈ cluster edge
+    type ScatterTuning = {
+      yBasePct: number;   // Y_BASE = bbox.min.y + this × fullHeight
+      yTipPct: number;    // Y_TIP  = bbox.min.y + this × fullHeight
+      baseRPct: number;   // BASE_R = this × maxR
+      tipRPct: number;    // TIP_R  = this × maxR
+      yMinKeepPct: number;// per-sample reject below this
+      yMaxKeepPct: number;// per-sample reject above this
+      rMaxKeepPct: number;// per-sample reject if vertex curR > this × maxR
+    };
+    const TUNING: ScatterTuning = isUltimate
+      // baseR 1.45 × maxR pushes lights to the visible foliage edge. Was 1.30; bumped to
+      // sit further outward per user feedback. Per-sample rMaxKeep loosened to 1.75 to
+      // ensure even the widest vertex picks remain inside the silhouette after push.
+      ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.45, tipRPct: 0.32, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.75 }
+      : { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95 };
+
+    const bbox = new THREE.Box3();
+    const tmpBox = new THREE.Box3();
+    const toModelM = new THREE.Matrix4();
+    if (isUltimate) {
+      // Full-tree bbox excluding (a) structural / non-foliage meshes (Stand, PVC pole),
+      // and (b) the studio env room (`defaultEnv` group) which is added as a child of `model`
+      // and would otherwise expand maxR to ~2m → scatter onto walls.
+      // Captures the visible alpha-textured foliage extent — clusters alone are too narrow.
+      model.traverse((child) => {
+        if (!(child as THREE.Mesh).isMesh) return;
+        const mesh = child as THREE.Mesh;
+        // Skip anything under the env group (env walls/floor/ceiling).
+        let p: THREE.Object3D | null = mesh.parent;
+        while (p) {
+          if (p.name === 'defaultEnv') return;
+          p = p.parent;
+        }
+        // Skip the metal Stand (X-frame base) and PVC trunk — they're either wider than the
+        // foliage (Stand) or irrelevant to the silhouette.
+        const n = mesh.name;
+        if (n.startsWith('Stand') || n === 'PVC' || n.startsWith('Cube.003')) return;
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        tmpBox.copy(mesh.geometry.boundingBox!);
+        toModelM.multiplyMatrices(modelInverse, mesh.matrixWorld);
+        tmpBox.applyMatrix4(toModelM);
+        bbox.union(tmpBox);
+      });
+    } else {
       for (const c of clusters) {
         if (!c.geometry.boundingBox) c.geometry.computeBoundingBox();
         tmpBox.copy(c.geometry.boundingBox!);
@@ -1135,27 +1203,25 @@ export default function Scene({
         tmpBox.applyMatrix4(toModelM);
         bbox.union(tmpBox);
       }
-      const fullHeight = bbox.max.y - bbox.min.y;
-      // Skip lowest 5% (trunk/base spread) and top 10% (wispy tip / star) for scatter shape
-      Y_BASE = bbox.min.y + fullHeight * 0.05;
-      Y_TIP  = bbox.min.y + fullHeight * 0.90;
-      const maxR = Math.max(
-        Math.abs(bbox.max.x), Math.abs(bbox.min.x),
-        Math.abs(bbox.max.z), Math.abs(bbox.min.z),
-      );
-      sketchMaxR = maxR;
-      // Tighter cone: base 85% of AABB radius, tip 12% — keeps bulbs INSIDE the visible silhouette
-      BASE_R = maxR * 0.85;
-      TIP_R  = maxR * 0.12;
-      // Per-sample acceptance guards (used inside the scatter loop):
-      // - Reject vertex picks whose y is above the trimmed top → kills "hovering above tip" lights
-      // - Reject vertex picks whose radial distance is way past the AABB (outlier branches)
-      sketchYMaxKeep = bbox.min.y + fullHeight * 0.92;
-      sketchYMinKeep = bbox.min.y + fullHeight * 0.02;
-      // Scale jitter to tree size (ultimate uses 0.015 with maxR≈0.5 → ~3% of maxR)
-      console.info('[sketchTree lights] bounds:', { Y_BASE, Y_TIP, BASE_R, TIP_R, sketchYMaxKeep, sketchMaxR });
     }
-    const sketchJitter = isSketch ? sketchMaxR * 0.025 : JITTER;
+    const fullHeight = bbox.max.y - bbox.min.y;
+    const maxR = Math.max(
+      Math.abs(bbox.max.x), Math.abs(bbox.min.x),
+      Math.abs(bbox.max.z), Math.abs(bbox.min.z),
+    );
+
+    const Y_BASE     = bbox.min.y + fullHeight * TUNING.yBasePct;
+    const Y_TIP      = bbox.min.y + fullHeight * TUNING.yTipPct;
+    const BASE_R     = maxR * TUNING.baseRPct;
+    const TIP_R      = maxR * TUNING.tipRPct;
+    const yMinKeep   = bbox.min.y + fullHeight * TUNING.yMinKeepPct;
+    const yMaxKeep   = bbox.min.y + fullHeight * TUNING.yMaxKeepPct;
+    const rMaxKeep   = maxR * TUNING.rMaxKeepPct;
+    // Jitter ~3% of maxR keeps the per-bulb perturbation visually consistent across sizes
+    // (ultimate@150 used 0.015 ≈ 3% × ~0.5 maxR; sketch was already 2.5%).
+    const JITTER     = maxR * (isSketch ? 0.025 : 0.030);
+
+    console.info(`[${isUltimate ? 'fishbone' : 'sketch'} lights] bounds:`, { fullHeight, maxR, Y_BASE, Y_TIP, BASE_R, TIP_R, clusters: clusters.length });
 
     // Dynamic over-sampling: aim for ~totalLightCount × safetyFactor candidates AFTER all filters.
     // - 360 mode (ultimate): small headroom (1.2×) for shuffle/trim variance.
@@ -1196,10 +1262,11 @@ export default function Scene({
           tmpV.fromBufferAttribute(posAttr, idx).applyMatrix4(toModel);
           const vertex = tmpV.clone();
           const curR = Math.hypot(vertex.x, vertex.z);
-          if (isSketch) {
-            if (vertex.y > sketchYMaxKeep || vertex.y < sketchYMinKeep) continue;
-            if (curR > sketchMaxR * 0.95) continue;
-          }
+          // Per-sample acceptance guards — applied uniformly across both families now that
+          // bounds are bbox-derived. Kills hovering bulbs above the trimmed tip and outlier
+          // wide-branch picks beyond the silhouette.
+          if (vertex.y > yMaxKeep || vertex.y < yMinKeep) continue;
+          if (curR > rMaxKeep) continue;
           const dir = vertex.clone().sub(pivot);
           if (dir.lengthSq() < 1e-8) dir.set(vertex.x, 0, vertex.z);
           dir.normalize();
@@ -1214,8 +1281,8 @@ export default function Scene({
           tmpPerp.crossVectors(dir, tmpUp);
           if (tmpPerp.lengthSq() < 1e-6) tmpPerp.set(1, 0, 0);
           tmpPerp.normalize();
-          const jx = (Math.random() * 2 - 1) * sketchJitter;
-          const jy = (Math.random() * 2 - 1) * sketchJitter;
+          const jx = (Math.random() * 2 - 1) * JITTER;
+          const jy = (Math.random() * 2 - 1) * JITTER;
           const tmpPerp2 = new THREE.Vector3().crossVectors(dir, tmpPerp).normalize();
           finalPos.addScaledVector(tmpPerp, jx).addScaledVector(tmpPerp2, jy);
           if (frontOnly && !isFrontForTree(finalPos, treeModelPath)) continue;
@@ -1284,24 +1351,26 @@ export default function Scene({
   }, [treeReady, treeModelPath, lightLayers, frontOnly]);
 
   // ---- Update tree color on foliage materials ----
+  // Uses the load-time `userData.isFoliage` tag (set during tree load) instead of a hue gate.
+  // The old hue gate was stateful: after switching to a non-greenish color (e.g. 스노우),
+  // the gate could never reverse the change. treeReady is in deps so newly loaded trees
+  // pick up the current treeColor immediately.
   useEffect(() => {
     const target = loadedModelRef.current;
     if (!target) return;
 
     const color = new THREE.Color(treeColor);
     target.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        const mat = mesh.material as THREE.MeshStandardMaterial;
-        // Only recolor materials that look like foliage (greenish hue)
-        // Skip trunk, star, etc.
-        if (mat.color && mat.color.getHSL({ h: 0, s: 0, l: 0 }).h > 0.2 && mat.color.getHSL({ h: 0, s: 0, l: 0 }).h < 0.45) {
-          mat.color.copy(color);
-          mat.needsUpdate = true;
-        }
-      }
+      if (!(child as THREE.Mesh).isMesh) return;
+      const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
+      const mats = Array.isArray(mat) ? mat : [mat];
+      mats.forEach((m) => {
+        if (!m?.userData?.isFoliage || !m.color) return;
+        m.color.copy(color);
+        m.needsUpdate = true;
+      });
     });
-  }, [treeColor]);
+  }, [treeColor, treeReady]);
 
   // ---- Toggle light emission: on / blink / off ----
   useEffect(() => {
