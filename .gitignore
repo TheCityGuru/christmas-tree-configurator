@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.cache/
+
+# Vercel — per-user local link, not project state
+.vercel/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# Local backup files (historical checkpoints, not project history)
+*.bak
+
+# WSL/NTFS metadata
+*.Zone.Identifier
+*:Zone.Identifier

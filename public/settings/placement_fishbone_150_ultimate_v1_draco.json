@@ -1,0 +1,446 @@
+{
+  "tree": "/models/trees/fishbone_150_ultimate_v1_draco.glb",
+  "placements": [
+    {
+      "ornamentPath": "/models/Snowflake_Radiance.glb",
+      "beaconKey": "0.2830,0.9043,-0.1308",
+      "rotation": [
+        0,
+        2.1093334086443045,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Snowflake_Radiance.glb",
+      "beaconKey": "0.2284,0.6946,0.3249",
+      "rotation": [
+        0,
+        0.5464104850882284,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Gingko_Charm.glb",
+      "beaconKey": "-0.2833,0.7435,-0.2187",
+      "rotation": [
+        0,
+        -2.1310026694455493,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Gingko_Charm.glb",
+      "beaconKey": "-0.1330,0.8899,-0.2879",
+      "rotation": [
+        0,
+        -2.5392130963027366,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Ornate_Chalice.glb",
+      "beaconKey": "0.2458,0.4658,-0.3752",
+      "rotation": [
+        0,
+        2.6913689974963177,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Ornate_Chalice.glb",
+      "beaconKey": "0.2327,0.8899,-0.2154",
+      "rotation": [
+        0,
+        2.478312297404857,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Trumpeting_Angel_predraco.glb",
+      "beaconKey": "-0.2384,0.6946,0.3177",
+      "rotation": [
+        0,
+        -0.984456627718175,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Trumpeting_Angel_predraco.glb",
+      "beaconKey": "0.3397,0.8640,0.0618",
+      "rotation": [
+        0,
+        1.348217836249467,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Spiral_star.glb",
+      "beaconKey": "-0.1005,1.1475,0.2071",
+      "rotation": [
+        0,
+        -0.6725562935700301,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Spiral_star.glb",
+      "beaconKey": "-0.2955,0.7435,0.2019",
+      "rotation": [
+        0,
+        -1.0591355698617824,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Reindeer.glb",
+      "beaconKey": "-0.3535,0.6063,0.1833",
+      "rotation": [
+        0,
+        -1.1708640255965728,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_smooth.glb",
+      "beaconKey": "0.1204,0.7435,-0.3370",
+      "rotation": [
+        0,
+        2.982380716566305,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_smooth.glb",
+      "beaconKey": "0.0062,0.6946,-0.3971",
+      "rotation": [
+        0,
+        -2.824929567820876,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_smooth.glb",
+      "beaconKey": "-0.3926,0.4433,0.2301",
+      "rotation": [
+        0,
+        -1.1284101635613863,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_smooth.glb",
+      "beaconKey": "-0.1510,0.4450,-0.4307",
+      "rotation": [
+        0,
+        -2.6769794212389386,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_smooth.glb",
+      "beaconKey": "-0.1520,0.9043,0.2722",
+      "rotation": [
+        0,
+        -0.6716799803071495,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_smooth.glb",
+      "beaconKey": "0.2668,0.5792,0.3049",
+      "rotation": [
+        0,
+        0.7636931061256844,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_mat.glb",
+      "beaconKey": "-0.2152,1.1648,0.0364",
+      "rotation": [
+        0,
+        -1.440004822309958,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_mat.glb",
+      "beaconKey": "-0.2385,0.8640,-0.2497",
+      "rotation": [
+        0,
+        -2.2589493969167878,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_mat.glb",
+      "beaconKey": "-0.3112,0.8640,0.1497",
+      "rotation": [
+        0,
+        -1.0588416226977548,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_mat.glb",
+      "beaconKey": "-0.3951,0.5792,-0.0899",
+      "rotation": [
+        0,
+        -1.8426838475482055,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_mat.glb",
+      "beaconKey": "0.1812,0.7844,-0.2839",
+      "rotation": [
+        0,
+        2.751463655874228,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ornament_Ball_mat.glb",
+      "beaconKey": "-0.1938,0.6898,-0.2926",
+      "rotation": [
+        0,
+        -2.371549935177724,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "-0.3501,0.7887,-0.0517",
+      "rotation": [
+        0,
+        -1.6937235141760667,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "-0.4562,0.4450,0.0105",
+      "rotation": [
+        0,
+        -1.6297375106836316,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "-0.2962,0.5449,0.2738",
+      "rotation": [
+        0,
+        -0.9209859595297989,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "0.0589,0.4645,-0.4750",
+      "rotation": [
+        0,
+        -3.129465727327942,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "0.2184,0.6898,-0.2748",
+      "rotation": [
+        0,
+        2.6976764983794927,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "0.4328,0.4658,0.1179",
+      "rotation": [
+        0,
+        1.1578577479587022,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "0.2529,0.7887,0.2476",
+      "rotation": [
+        0,
+        0.6491240640865692,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "0.4379,0.3645,-0.2237",
+      "rotation": [
+        0,
+        2.1099729900329214,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "-0.2809,0.4658,-0.3498",
+      "rotation": [
+        0,
+        -2.3616158068653377,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/ribon_custom_material.glb",
+      "beaconKey": "-0.0828,0.3175,0.5094",
+      "rotation": [
+        0,
+        -0.2816882833536255,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Frosted_Leaf_Charm.glb",
+      "beaconKey": "-0.0288,1.3056,0.1850",
+      "rotation": [
+        0,
+        -0.6177065850583879,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Frosted_Leaf_Charm.glb",
+      "beaconKey": "-0.0370,0.9043,-0.3096",
+      "rotation": [
+        0,
+        -2.8238592608744124,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ribbon.glb",
+      "beaconKey": "0.1659,1.1475,0.1596",
+      "rotation": [
+        0,
+        0.5637305082413978,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Ribbon.glb",
+      "beaconKey": "0.1689,0.5449,0.3663",
+      "rotation": [
+        0,
+        0.37172056657569413,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Bronchial_Tree.glb",
+      "beaconKey": "-0.0616,0.8899,0.3111",
+      "rotation": [
+        0,
+        -0.38525334288259233,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Bronchial_Tree.glb",
+      "beaconKey": "0.3796,0.6946,-0.1169",
+      "rotation": [
+        0,
+        1.9249844119234396,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Icicle_ornament.glb",
+      "beaconKey": "0.4529,0.4433,0.0446",
+      "rotation": [
+        0,
+        1.6888369500274092,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Icicle_ornament.glb",
+      "beaconKey": "0.3548,0.6169,0.1849",
+      "rotation": [
+        0,
+        1.0531377055650342,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_icicle_pendant.glb",
+      "beaconKey": "-0.0855,1.3056,-0.1666",
+      "rotation": [
+        0,
+        -2.240315243077094,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_icicle_pendant.glb",
+      "beaconKey": "0.3136,0.7887,-0.1640",
+      "rotation": [
+        0,
+        2.1521607268974448,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Beaded_Diamond_Pendan.glb",
+      "beaconKey": "0.0651,0.6063,0.3929",
+      "rotation": [
+        0,
+        0.25216487874369453,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Beaded_Diamond_Pendan.glb",
+      "beaconKey": "-0.3758,0.6946,-0.1286",
+      "rotation": [
+        0,
+        -1.786290839185913,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Spiral_Faceted_Pendan.glb",
+      "beaconKey": "0.4238,0.3245,-0.0229",
+      "rotation": [
+        0,
+        1.4791068923831558,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Spiral_Faceted_Pendan.glb",
+      "beaconKey": "0.0202,0.7844,0.3362",
+      "rotation": [
+        0,
+        -0.09749593665449532,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Filigree_Duck.glb",
+      "beaconKey": "-0.3957,0.6169,0.0589",
+      "rotation": [
+        0,
+        -1.4426384911074477,
+        0
+      ]
+    },
+    {
+      "ornamentPath": "/models/Silver_Filigree_Duck.glb",
+      "beaconKey": "0.1638,0.8640,-0.3040",
+      "rotation": [
+        0,
+        2.8260595499169474,
+        0
+      ]
+    }
+  ]
+}

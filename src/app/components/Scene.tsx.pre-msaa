@@ -1,0 +1,1002 @@
+import { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+import { MeshoptDecoder } from 'meshoptimizer';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import GUI from 'lil-gui';
+
+// ---------- Types ----------
+interface SceneProps {
+  /** Path to the currently selected tree GLB model */
+  treeModelPath?: string;
+  /** Tree color — applied to foliage materials */
+  treeColor?: string;
+  /** Scale multiplier (maps to size options like 120cm, 150cm, etc.) */
+  treeScale?: number;
+  /** Whether decorative lights are toggled on */
+  lightsOn?: boolean;
+  /** Paths to ornament GLB files to scatter on the tree */
+  ornamentPaths?: string[];
+  /** How many ornaments to place (default 30) */
+  ornamentCount?: number;
+  /** Show/hide beacon plane meshes */
+  showBeacons?: boolean;
+  /** HDRI environment map path */
+  hdriPath?: string;
+}
+
+// ---------- Helpers ----------
+
+// Shadows disabled for performance
+
+/** Dispose all geometries and materials inside a group */
+function disposeGroup(group: THREE.Object3D) {
+  group.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      mesh.geometry?.dispose();
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach((m) => m.dispose());
+      } else {
+        mesh.material?.dispose();
+      }
+    }
+  });
+}
+
+// Shared loader instance (reused across loads, has built-in cache)
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
+gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+
+// Shared ornament normal map
+const textureLoader = new THREE.TextureLoader();
+const ornamentNormalMap = textureLoader.load('/models/textures/glitter_normal.jpeg');
+ornamentNormalMap.wrapS = THREE.RepeatWrapping;
+ornamentNormalMap.wrapT = THREE.RepeatWrapping;
+ornamentNormalMap.repeat.set(3.5, 3.5);
+
+// Dark material used to hide non-emissive objects during bloom pass
+const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+// Shader that additively blends bloom texture over the base scene
+const bloomCompositeShader = {
+  uniforms: {
+    baseTexture: { value: null as THREE.Texture | null },
+    bloomTexture: { value: null as THREE.Texture | null },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D baseTexture;
+    uniform sampler2D bloomTexture;
+    varying vec2 vUv;
+    void main() {
+      vec4 base = texture2D(baseTexture, vUv);
+      vec4 bloom = texture2D(bloomTexture, vUv);
+      gl_FragColor = base + bloom;
+    }
+  `,
+};
+
+/**
+ * Extract beacon positions from a loaded tree GLB.
+ * Beacons are objects whose name starts with "Plane".
+ * The quarter-tree beacons are rotated ×4 (0°, 90°, 180°, 270°) to fill the full tree.
+ * Beacon meshes are hidden. Returns positions in model-local space.
+ */
+/**
+ * Extract beacon positions from a loaded tree GLB and mirror ×4 for the full tree.
+ * Beacons are Plane* objects. Positions are returned in the model's local coordinate
+ * system (before any Scene.tsx scale/position transforms), matching the space where
+ * branch clones are rotated. The caller must place ornaments as children of the model
+ * or account for the model's transform.
+ */
+function extractBeaconPositions(model: THREE.Object3D): THREE.Vector3[] {
+  const quarterPositions: THREE.Vector3[] = [];
+
+  // Collect beacon positions in model-local space by walking up to model root
+  model.updateMatrixWorld(true);
+  const modelMatInv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+
+  model.traverse((child) => {
+    if (child.name.startsWith('Plane') || child.name.startsWith('spot')) {
+      const worldPos = new THREE.Vector3();
+      child.getWorldPosition(worldPos);
+      // Convert to model-local space (raw GLB coordinates)
+      worldPos.applyMatrix4(modelMatInv);
+      quarterPositions.push(worldPos);
+      // Visibility controlled by showBeacons prop via useEffect
+    }
+  });
+
+  // Beacons are already cloned ×4 in the model loading step (for fishbone trees),
+  // so quarterPositions actually contains ALL beacon positions (original + clones).
+  return quarterPositions;
+}
+
+/** Seeded shuffle (Fisher-Yates with mulberry32 PRNG) */
+function seededShuffle<T>(arr: T[], seed: number = 42): T[] {
+  const result = [...arr];
+  let s = seed;
+  const rand = () => {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// ---------- Component ----------
+export default function Scene({
+  treeModelPath,
+  treeColor = '#2d5a27',
+  treeScale = 1,
+  lightsOn = false,
+  ornamentPaths = [],
+  ornamentCount = 30,
+  showBeacons = false,
+  hdriPath = '/models/hdri/brown_photostudio_02_1k.exr',
+}: SceneProps) {
+  const mountRef = useRef<HTMLDivElement>(null);
+
+  // Refs to mutable scene objects so we can update them without re-creating the scene
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const treeGroupRef = useRef<THREE.Group>(new THREE.Group());
+  const loadedModelRef = useRef<THREE.Group | null>(null);
+  const ornamentGroupRef = useRef<THREE.Group>(new THREE.Group());
+  // Cache loaded ornament GLTF scenes keyed by path
+  const ornamentCacheRef = useRef<Map<string, THREE.Group>>(new Map());
+  const guiRef = useRef<GUI | null>(null);
+  const composerRef = useRef<EffectComposer | null>(null);
+  const bloomPassRef = useRef<UnrealBloomPass | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const animFrameRef = useRef<number>(0);
+  const clockRef = useRef(new THREE.Clock());
+  const [treeReady, setTreeReady] = useState(0); // bumped when tree model finishes loading
+  const [loadProgress, setLoadProgress] = useState<number | 'indeterminate' | null>(null);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---- Initial scene setup (runs once) ----
+  useEffect(() => {
+    if (!mountRef.current) return;
+    const container = mountRef.current;
+
+    // Scene
+    const scene = new THREE.Scene();
+    sceneRef.current = scene;
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(
+      50,
+      container.clientWidth / container.clientHeight,
+      0.1,
+      100,
+    );
+    camera.position.set(-3.6657, 0.9794, 3.1181);
+    cameraRef.current = camera;
+
+    // Renderer — prefer discrete GPU, cap pixel ratio for perf
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+    const renderer = new THREE.WebGLRenderer({
+      antialias: !isMobile,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.74;
+    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    // ---- Selective bloom post-processing ----
+    // Bloom composer: renders scene with non-emissive objects blacked out
+    const bloomComposer = new EffectComposer(renderer);
+    bloomComposer.renderToScreen = false;
+    bloomComposer.addPass(new RenderPass(scene, camera));
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(container.clientWidth, container.clientHeight),
+      0.8,   // strength
+      1.0,   // radius
+      0.85,  // threshold
+    );
+    bloomComposer.addPass(bloomPass);
+
+    composerRef.current = bloomComposer;
+    bloomPassRef.current = bloomPass;
+
+    // Fullscreen quad to overlay bloom additively
+    const bloomOverlayMat = new THREE.ShaderMaterial({
+      uniforms: {
+        bloomTexture: { value: null },
+      },
+      vertexShader: bloomCompositeShader.vertexShader,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D bloomTexture;
+        varying vec2 vUv;
+        void main() {
+          gl_FragColor = texture2D(bloomTexture, vUv);
+        }
+      `,
+      blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneFactor,
+      blendEquationAlpha: THREE.AddEquation,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneFactor,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      toneMapped: false,
+    });
+    const bloomOverlayQuad = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      bloomOverlayMat,
+    );
+    const bloomOverlayScene = new THREE.Scene();
+    bloomOverlayScene.add(bloomOverlayQuad);
+    const bloomOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    // Store for animation loop
+    const bloomState = { bloomComposer, bloomOverlayScene, bloomOverlayCamera, bloomOverlayMat };
+    const materialCache = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+
+    // Controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.enablePan = true;
+    controls.target.set(0.1345, 1.092, 0.3711);
+    controls.minDistance = 1;
+    controls.maxDistance = 30;
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI;
+    controlsRef.current = controls;
+
+    // ---- HDRI Environment (loaded via separate useEffect) ----
+
+    // ---- Directional Light ----
+    {
+      const dirLight = new THREE.DirectionalLight(new THREE.Color('#dfd59b'), 0);
+      dirLight.position.set(5.9, 5.9, 10.6);
+      dirLight.castShadow = true;
+      {
+        const dl = dirLight;
+        dl.shadow.camera.bottom = -5;
+        dl.shadow.bias = -0.002;
+      }
+      scene.add(dirLight);
+      dirLightRef.current = dirLight;
+    }
+
+    // ---- Tree group ----
+    const treeGroup = treeGroupRef.current;
+    treeGroup.position.y = -1;
+    scene.add(treeGroup);
+
+    // ---- Ornament group (child of tree group so it moves/scales with the tree) ----
+    const ornGroup = ornamentGroupRef.current;
+    treeGroup.add(ornGroup);
+
+    // Shadow-receiving ground plane
+    const groundGeo = new THREE.PlaneGeometry(20, 20);
+    const groundMat = new THREE.ShadowMaterial({ opacity: 0.3 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -1;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // ---- Animation loop ----
+    const clock = clockRef.current;
+    const animate = () => {
+      animFrameRef.current = requestAnimationFrame(animate);
+      controls.update();
+
+      // Pass 1: Render bloom — swap non-emissive materials to black
+      const prevBg = scene.background;
+      const prevEnv = scene.environment;
+      scene.background = null;
+      scene.environment = null;
+      scene.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+          if (mat.isMeshStandardMaterial && mat.emissiveIntensity > 0 && mat.emissive && mat.emissive.getHSL({ h: 0, s: 0, l: 0 }).l > 0) {
+            // Emissive — keep for bloom
+          } else {
+            materialCache.set(mesh, mesh.material);
+            mesh.material = darkMaterial;
+          }
+        }
+      });
+      // Disable tone mapping for bloom pass (avoid double tone mapping)
+      const prevToneMapping = renderer.toneMapping;
+      renderer.toneMapping = THREE.NoToneMapping;
+      bloomState.bloomComposer.render();
+      renderer.toneMapping = prevToneMapping;
+
+      // Update bloom texture uniform to match composer's current read buffer
+      bloomState.bloomOverlayMat.uniforms.bloomTexture.value =
+        bloomState.bloomComposer.readBuffer.texture;
+
+      // Restore materials and environment
+      materialCache.forEach((mat, mesh) => { mesh.material = mat; });
+      materialCache.clear();
+      scene.background = prevBg;
+      scene.environment = prevEnv;
+
+      // Pass 2: Render normal scene, then overlay bloom additively
+      renderer.render(scene, camera);
+      renderer.autoClear = false;
+      renderer.render(bloomState.bloomOverlayScene, bloomState.bloomOverlayCamera);
+      renderer.autoClear = true;
+    };
+    animate();
+
+    // ---- Resize ----
+    const resizeObserver = new ResizeObserver(() => {
+      if (!container) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      bloomState.bloomComposer.setSize(w, h);
+    });
+    resizeObserver.observe(container);
+
+    // ---- Cleanup ----
+    return () => {
+      resizeObserver.disconnect();
+      cancelAnimationFrame(animFrameRef.current);
+      container.removeChild(renderer.domElement);
+      renderer.dispose();
+      disposeGroup(treeGroup);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Load HDRI environment when hdriPath changes ----
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !hdriPath) return;
+    new EXRLoader().load(hdriPath, (texture) => {
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      // Dispose previous environment texture
+      if (scene.environment) scene.environment.dispose();
+      scene.environment = texture;
+      scene.environmentIntensity = 0.88;
+    });
+  }, [hdriPath]);
+
+  // ---- Load GLB model when treeModelPath changes ----
+  useEffect(() => {
+    if (!treeModelPath) return;
+    const treeGroup = treeGroupRef.current;
+
+    // Clear any previous fade timer and show loading bar
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    setLoadProgress(0);
+
+    gltfLoader.load(
+      treeModelPath,
+      (gltf) => {
+        // Briefly show 100% then fade out
+        setLoadProgress(100);
+        fadeTimerRef.current = setTimeout(() => setLoadProgress(null), 400);
+        // Remove previously loaded model
+        if (loadedModelRef.current) {
+          disposeGroup(loadedModelRef.current);
+          treeGroup.remove(loadedModelRef.current);
+        }
+
+        const model = gltf.scene;
+
+        // Auto-center and scale the model to fit the viewport nicely
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+
+        // Normalize to ~4 units tall (roughly matching placeholder height)
+        const targetHeight = 4;
+        const scaleFactor = targetHeight / size.y;
+        model.scale.setScalar(scaleFactor * treeScale);
+
+        // Center horizontally, sit on ground
+        model.position.x = -center.x * scaleFactor;
+        model.position.z = -center.z * scaleFactor;
+        model.position.y = -box.min.y * scaleFactor;
+
+        // For treeV3test: clone "Cube" and "Cube001" at 90° intervals
+        if (treeModelPath.includes('treeV3test') && !treeModelPath.includes('treeV3test2')) {
+          const rotations = [Math.PI / 2, Math.PI, Math.PI * 3 / 2]; // 90°, 180°, 270°
+          const nodesToClone = ['Cube', 'Cube001'];
+          const clones: THREE.Object3D[] = [];
+          model.traverse((child) => {
+            if (nodesToClone.includes(child.name)) {
+              rotations.forEach((angle, idx) => {
+                const clone = child.clone(true);
+                clone.name = `${child.name}_clone_${idx}`;
+                clone.rotateY(angle);
+                clones.push(clone);
+              });
+            }
+          });
+          clones.forEach((c) => model.add(c));
+        }
+
+        // For treeV3test2/treeV3test3: clone "Cube" and "Cube001" at 90° intervals (keep originals)
+        if (treeModelPath.includes('treeV3test2') || treeModelPath.includes('treeV3test3')) {
+          const rotations = [Math.PI / 2, Math.PI, Math.PI * 3 / 2]; // 90°, 180°, 270°
+          const nodesToClone = ['Cube', 'Cube001'];
+          const clones: THREE.Object3D[] = [];
+          model.traverse((child) => {
+            if (nodesToClone.includes(child.name)) {
+              rotations.forEach((angle, idx) => {
+                const clone = child.clone(true);
+                clone.name = `${child.name}_clone_${idx}`;
+                clone.rotateY(angle);
+                clones.push(clone);
+              });
+            }
+          });
+          clones.forEach((c) => model.add(c));
+        }
+
+        // For fishbone_plane_work: clone branches + beacon planes at 90° intervals
+        if (treeModelPath.includes('fishbone_plane_work')) {
+          const rotations = [Math.PI / 2, Math.PI, Math.PI * 3 / 2];
+          // Clone branch groups (Three.js strips dots from GLB names: Cube.001 → Cube001)
+          const nodesToClone = ['Cube', 'Cube001'];
+          const clones: THREE.Object3D[] = [];
+          model.traverse((child) => {
+            if (nodesToClone.includes(child.name)) {
+              rotations.forEach((angle, idx) => {
+                const clone = child.clone(true);
+                clone.name = `${child.name}_clone_${idx}`;
+                clone.rotateY(angle);
+                clones.push(clone);
+              });
+            }
+          });
+          // Clone all Plane beacons at each rotation (they're top-level, not children of Cube)
+          const beaconNodes: THREE.Object3D[] = [];
+          model.traverse((child) => {
+            if (child.name.startsWith('Plane')) {
+              beaconNodes.push(child);
+            }
+          });
+          beaconNodes.forEach((beacon) => {
+            rotations.forEach((angle, idx) => {
+              const clone = beacon.clone(true);
+              clone.name = `${beacon.name}_rot_${idx}`;
+              // Rotate position around Y axis
+              const pos = clone.position.clone();
+              const cos = Math.cos(angle);
+              const sin = Math.sin(angle);
+              clone.position.set(
+                pos.x * cos + pos.z * sin,
+                pos.y,
+                -pos.x * sin + pos.z * cos,
+              );
+              clones.push(clone);
+            });
+          });
+          clones.forEach((c) => model.add(c));
+        }
+
+        // For jopsal_fish_v9: clone branches + beacon spots at 90° intervals
+        // Same quarter-tree structure as fishbone, but nodes are named tree/tree001 and spot*
+        if (treeModelPath.includes('jopsal_fish_v9')) {
+          const rotations = [Math.PI / 2, Math.PI, Math.PI * 3 / 2];
+          const nodesToClone = ['tree', 'tree001'];
+          const clones: THREE.Object3D[] = [];
+          model.traverse((child) => {
+            if (nodesToClone.includes(child.name)) {
+              rotations.forEach((angle, idx) => {
+                const clone = child.clone(true);
+                clone.name = `${child.name}_clone_${idx}`;
+                clone.rotateY(angle);
+                clones.push(clone);
+              });
+            }
+          });
+          // Clone all spot beacons at each rotation
+          const beaconNodes: THREE.Object3D[] = [];
+          model.traverse((child) => {
+            if (child.name.startsWith('spot')) {
+              beaconNodes.push(child);
+            }
+          });
+          beaconNodes.forEach((beacon) => {
+            rotations.forEach((angle, idx) => {
+              const clone = beacon.clone(true);
+              clone.name = `${beacon.name}_rot_${idx}`;
+              const pos = clone.position.clone();
+              const cos = Math.cos(angle);
+              const sin = Math.sin(angle);
+              clone.position.set(
+                pos.x * cos + pos.z * sin,
+                pos.y,
+                -pos.x * sin + pos.z * cos,
+              );
+              clones.push(clone);
+            });
+          });
+          clones.forEach((c) => model.add(c));
+
+          // Hide BézierCurve (light) meshes baked into tree — replaced by jopsal_light.glb
+          model.traverse((child) => {
+            if (child.name.startsWith('B\u00e9zier') || child.name.startsWith('Bezier')) {
+              child.visible = false;
+            }
+          });
+
+          // Load separate light model and add as child of tree model
+          // so it inherits the tree's transforms (scale, position, re-center)
+          gltfLoader.load('/models/jopsal_light.glb', (lightGltf) => {
+            const lightModel = lightGltf.scene;
+            // Add directly as child of model (not treeGroup) so it inherits tree transforms
+            // Position at tree's local origin — the light GLB is already authored
+            // in the same coordinate space as the tree
+            lightModel.position.set(0, 0, 0);
+            // No cloning — the GLB already contains 2 BézierCurve objects (one rotated 180°)
+            lightModel.traverse((child) => {
+              if ((child as THREE.Mesh).isMesh) {
+                const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
+                if (mat.name === 'Material.006') {
+                  // Match tree's emissive: warm yellow [1, 0.615, 0] at strength 20
+                  mat.emissive = new THREE.Color(1, 0.6154, 0);
+                  mat.emissiveIntensity = 20.0;
+                  mat.needsUpdate = true;
+                }
+              }
+            });
+            model.add(lightModel);
+          });
+
+          // Load env test model
+          gltfLoader.load('/models/env_test.glb', (envGltf) => {
+            const envModel = envGltf.scene;
+            envModel.position.set(0, 0, 0);
+            model.add(envModel);
+          });
+
+          // Load ball+string decoration model
+          gltfLoader.load('/models/jopsal_fish_v9_ball_string.glb', (ballGltf) => {
+            const ballModel = ballGltf.scene;
+            ballModel.position.set(0, 0, 0);
+            ballModel.scale.setScalar(0.95);
+            model.add(ballModel);
+          });
+        }
+
+        // Re-center after any cloning to ensure consistent origin
+        {
+          const box2 = new THREE.Box3().setFromObject(model);
+          const center2 = box2.getCenter(new THREE.Vector3());
+          const scaleFactor2 = model.scale.x; // uniform scale
+          model.position.x = -center2.x;
+          model.position.z = -center2.z;
+          model.position.y = -box2.min.y;
+        }
+
+        // Enable shadows on all meshes
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        treeGroup.add(model);
+        loadedModelRef.current = model;
+        setTreeReady((n) => n + 1); // signal ornament effect to re-run
+      },
+      (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          setLoadProgress(Math.round((event.loaded / event.total) * 100));
+        } else {
+          setLoadProgress('indeterminate');
+        }
+      },
+      (error) => {
+        console.error('Failed to load tree model:', error);
+        setLoadProgress(null);
+      },
+    );
+  }, [treeModelPath, treeScale]);
+
+  // ---- Update tree color on foliage materials ----
+  useEffect(() => {
+    const target = loadedModelRef.current;
+    if (!target) return;
+
+    const color = new THREE.Color(treeColor);
+    target.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        // Only recolor materials that look like foliage (greenish hue)
+        // Skip trunk, star, etc.
+        if (mat.color && mat.color.getHSL({ h: 0, s: 0, l: 0 }).h > 0.2 && mat.color.getHSL({ h: 0, s: 0, l: 0 }).h < 0.45) {
+          mat.color.copy(color);
+          mat.needsUpdate = true;
+        }
+      }
+    });
+  }, [treeColor]);
+
+  // ---- Update scale when treeScale changes ----
+  useEffect(() => {
+    if (loadedModelRef.current) {
+      // Re-trigger model load to apply new scale cleanly
+      // (handled by treeModelPath effect dependency on treeScale)
+    }
+  }, [treeScale]);
+
+  // ---- Place ornaments on the tree ----
+  useEffect(() => {
+    const model = loadedModelRef.current;
+    const ornGroup = ornamentGroupRef.current;
+    if (!model || ornamentPaths.length === 0) {
+      // Clear existing ornaments
+      disposeGroup(ornGroup);
+      ornGroup.clear();
+      return;
+    }
+
+    // Extract beacon positions in model-local space (raw GLB coords)
+    const allBeacons = extractBeaconPositions(model);
+    if (allBeacons.length === 0) {
+      console.warn('No beacon positions found in tree model (no Plane* objects)');
+      return;
+    }
+
+    // Stratified selection: split beacons into 4 quadrants, pick evenly from each
+    const quadrantBuckets: THREE.Vector3[][] = [[], [], [], []];
+    allBeacons.forEach(p => {
+      const angle = Math.atan2(p.z, p.x);
+      const q = angle < 0 ? (angle < -Math.PI / 2 ? 2 : 3) : (angle < Math.PI / 2 ? 0 : 1);
+      quadrantBuckets[q].push(p);
+    });
+    const perQuadrant = Math.ceil(Math.min(ornamentCount, allBeacons.length) / 4);
+    const positions: THREE.Vector3[] = [];
+    quadrantBuckets.forEach((bucket, i) => {
+      const shuffled = seededShuffle(bucket, 42 + i);
+      positions.push(...shuffled.slice(0, perQuadrant));
+    });
+    // Trim to exact count (ceil may overshoot by up to 3)
+    const finalPositions = seededShuffle(positions, 99).slice(0, Math.min(ornamentCount, allBeacons.length));
+
+    // Load all ornament models, then distribute
+    const loadPromises = ornamentPaths.map((path) => {
+      if (ornamentCacheRef.current.has(path)) {
+        return Promise.resolve(ornamentCacheRef.current.get(path)!);
+      }
+      return new Promise<THREE.Group>((resolve, reject) => {
+        gltfLoader.load(
+          path,
+          (gltf) => {
+            ornamentCacheRef.current.set(path, gltf.scene);
+            resolve(gltf.scene);
+          },
+          undefined,
+          reject,
+        );
+      });
+    });
+
+    Promise.all(loadPromises).then((ornamentModels) => {
+      // Clear previous ornaments
+      disposeGroup(ornGroup);
+      ornGroup.clear();
+
+      // Compute tree bbox for relative ornament sizing
+      const bbox = new THREE.Box3().setFromObject(model);
+      const treeSize = bbox.getSize(new THREE.Vector3());
+
+      // Seeded random for consistent ornament type assignment
+      let sSeed = 12345;
+      const ornRand = () => {
+        sSeed |= 0; sSeed = (sSeed + 0x6D2B79F5) | 0;
+        let t = Math.imul(sSeed ^ (sSeed >>> 15), 1 | sSeed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+
+      finalPositions.forEach((pos) => {
+        // Randomly pick ornament type
+        const modelIdx = Math.floor(ornRand() * ornamentModels.length);
+        const srcModel = ornamentModels[modelIdx];
+        const clone = srcModel.clone();
+        // Check if this ornament should keep its original material
+        const keepOriginalMaterial = ornamentPaths[modelIdx]?.includes('ribon_custom_material')
+          || ornamentPaths[modelIdx]?.includes('Silver_Ornament_Ball_');
+
+        // Scale ornament to a reasonable size relative to tree
+        const ornBBox = new THREE.Box3().setFromObject(clone);
+        const ornSize = ornBBox.getSize(new THREE.Vector3());
+        const targetSize = treeSize.y * 0.05;
+        const scale = targetSize / Math.max(ornSize.x, ornSize.y, ornSize.z);
+        clone.scale.setScalar(scale);
+
+        // Apply editor material config to all ornament meshes (skip for custom-material models)
+        // Clone shared materials so meshes with/without UVs don't interfere
+        if (!keepOriginalMaterial) clone.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            // Clone material to avoid shared-material conflicts
+            mesh.material = (mesh.material as THREE.Material).clone();
+            const mat = mesh.material as THREE.MeshStandardMaterial;
+            if (mat && mat.isMeshStandardMaterial) {
+              mat.color.set('#e5e7e7');
+              mat.map = null; // Remove base color texture
+              mat.metalnessMap = null;
+              mat.roughnessMap = null;
+              mat.metalness = 0.75;
+              mat.roughness = 0.087;
+              mat.envMapIntensity = 1.0;
+              mat.emissive.set('#000000');
+              mat.emissiveIntensity = 1.0;
+              mat.side = THREE.DoubleSide;
+              // Only apply normal map if the mesh has UV coordinates
+              const hasUVs = mesh.geometry?.attributes?.uv;
+              if (hasUVs) {
+                mat.normalMap = ornamentNormalMap;
+                mat.normalScale.set(0.6, -0.6);
+              } else {
+                mat.normalMap = null;
+              }
+              // Physical material properties
+              const phys = mat as THREE.MeshPhysicalMaterial;
+              if ((phys as any).isMeshPhysicalMaterial) {
+                phys.clearcoat = 1.0;
+                phys.clearcoatRoughness = 1.0;
+                phys.ior = 2.33;
+                phys.specularIntensity = 1.0;
+              }
+              mat.needsUpdate = true;
+            }
+          }
+        });
+
+        // Find the string (BézierCurve) node to use its origin as the hang point
+        let stringNode: THREE.Object3D | null = null;
+        clone.traverse((child) => {
+          if (!stringNode && (child.name.startsWith('Bézier') || child.name.startsWith('BezierCurve') || child.name.startsWith('Bezier'))) {
+            stringNode = child;
+          }
+        });
+
+        // Convert spot position from model-local space to ornGroup-local space
+        const worldPos = pos.clone().applyMatrix4(model.matrixWorld);
+        const ornLocalPos = ornGroup.worldToLocal(worldPos);
+
+        if (stringNode) {
+          // Offset so the string's origin aligns with the spot position
+          const stringOrigin = new THREE.Vector3();
+          stringNode.getWorldPosition(stringOrigin);
+          const cloneWorldPos = new THREE.Vector3();
+          clone.getWorldPosition(cloneWorldPos);
+          // String offset relative to clone root (in clone's local space before scaling)
+          const offset = stringOrigin.clone().sub(cloneWorldPos).divideScalar(scale);
+          clone.position.copy(ornLocalPos).sub(offset.multiplyScalar(scale));
+        } else {
+          clone.position.copy(ornLocalPos);
+        }
+
+        // Random Y rotation only (keep ornament upright) — seeded so rotations stay
+        // consistent across re-renders instead of flickering on every state change.
+        clone.rotation.set(0, ornRand() * Math.PI * 2, 0);
+
+        ornGroup.add(clone);
+      });
+    });
+  }, [ornamentPaths, ornamentCount, treeReady]); // Re-run when ornaments, count, or tree changes
+
+  // ---- Toggle beacon plane visibility ----
+  useEffect(() => {
+    const model = loadedModelRef.current;
+    if (!model) return;
+    model.traverse((child) => {
+      if (child.name.startsWith('Plane') || child.name.startsWith('spot')) {
+        child.visible = showBeacons;
+      }
+    });
+  }, [showBeacons, treeReady]);
+
+  // ---- lil-gui material tweaker ----
+  useEffect(() => {
+    const model = loadedModelRef.current;
+    if (!model) return;
+
+    // Destroy previous GUI
+    if (guiRef.current) {
+      guiRef.current.destroy();
+      guiRef.current = null;
+    }
+
+    const gui = new GUI({ title: 'Material Editor' });
+    guiRef.current = gui;
+
+    // Helper to add a material folder
+    const addMatFolder = (parent: GUI, mat: THREE.MeshStandardMaterial, label: string) => {
+      const folder = parent.addFolder(label);
+      const params = {
+        color: '#' + mat.color.getHexString(),
+        metalness: mat.metalness,
+        roughness: mat.roughness,
+        envMapIntensity: mat.envMapIntensity,
+        emissive: '#' + mat.emissive.getHexString(),
+        emissiveIntensity: mat.emissiveIntensity,
+        opacity: mat.opacity,
+      };
+      folder.addColor(params, 'color').onChange((v: string) => { mat.color.set(v); mat.needsUpdate = true; });
+      folder.add(params, 'metalness', 0, 1, 0.01).onChange((v: number) => { mat.metalness = v; mat.needsUpdate = true; });
+      folder.add(params, 'roughness', 0, 1, 0.01).onChange((v: number) => { mat.roughness = v; mat.needsUpdate = true; });
+      folder.add(params, 'envMapIntensity', 0, 5, 0.1).onChange((v: number) => { mat.envMapIntensity = v; mat.needsUpdate = true; });
+      folder.addColor(params, 'emissive').onChange((v: string) => { mat.emissive.set(v); mat.needsUpdate = true; });
+      folder.add(params, 'emissiveIntensity', 0, 50, 0.1).onChange((v: number) => { mat.emissiveIntensity = v; mat.needsUpdate = true; });
+      folder.add(params, 'opacity', 0, 1, 0.01).onChange((v: number) => { mat.opacity = v; mat.transparent = v < 1; mat.needsUpdate = true; });
+      folder.close();
+      return folder;
+    };
+
+    // --- Bloom controls ---
+    const bloom = bloomPassRef.current;
+    if (bloom) {
+      const bloomSection = gui.addFolder('Bloom');
+      const bloomParams = {
+        strength: bloom.strength,
+        radius: bloom.radius,
+        threshold: bloom.threshold,
+      };
+      bloomSection.add(bloomParams, 'strength', 0, 3, 0.01).onChange((v: number) => { bloom.strength = v; });
+      bloomSection.add(bloomParams, 'radius', 0, 1, 0.01).onChange((v: number) => { bloom.radius = v; });
+      bloomSection.add(bloomParams, 'threshold', 0, 1, 0.01).onChange((v: number) => { bloom.threshold = v; });
+      bloomSection.open();
+    }
+
+    // --- Lights controls ---
+    const lightsSection = gui.addFolder('Lights');
+    const renderer = rendererRef.current;
+    if (renderer) {
+      const rendererParams = {
+        exposure: renderer.toneMappingExposure,
+      };
+      lightsSection.add(rendererParams, 'exposure', 0, 5, 0.01).name('Tone Map Exposure').onChange((v: number) => { renderer.toneMappingExposure = v; });
+    }
+    const scene = sceneRef.current;
+    if (scene) {
+      const envParams = {
+        envIntensity: scene.environmentIntensity ?? 1.1,
+      };
+      lightsSection.add(envParams, 'envIntensity', 0, 5, 0.01).name('HDRI Intensity').onChange((v: number) => { scene.environmentIntensity = v; });
+    }
+    const dirLight = dirLightRef.current;
+    if (dirLight) {
+      const dirFolder = lightsSection.addFolder('Directional');
+      const dirParams = {
+        color: '#' + dirLight.color.getHexString(),
+        intensity: dirLight.intensity,
+        posX: dirLight.position.x,
+        posY: dirLight.position.y,
+        posZ: dirLight.position.z,
+      };
+      dirFolder.addColor(dirParams, 'color').onChange((v: string) => { dirLight.color.set(v); });
+      dirFolder.add(dirParams, 'intensity', 0, 20, 0.01).onChange((v: number) => { dirLight.intensity = v; });
+      dirFolder.add(dirParams, 'posX', -20, 20, 0.1).name('pos X').onChange((v: number) => { dirLight.position.x = v; });
+      dirFolder.add(dirParams, 'posY', -20, 20, 0.1).name('pos Y').onChange((v: number) => { dirLight.position.y = v; });
+      dirFolder.add(dirParams, 'posZ', -20, 20, 0.1).name('pos Z').onChange((v: number) => { dirLight.position.z = v; });
+      dirFolder.open();
+    }
+    lightsSection.open();
+
+    // --- Tree materials ---
+    const treeSection = gui.addFolder('Tree');
+    const treeMatMap = new Map<string, THREE.MeshStandardMaterial>();
+    model.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        // Skip beacon planes
+        if (child.name.startsWith('Plane') || child.name.startsWith('spot')) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((m) => {
+          const mat = m as THREE.MeshStandardMaterial;
+          if (!mat.isMeshStandardMaterial) return;
+          const name = mat.name || `mesh_${child.name}_${mat.uuid.slice(0, 6)}`;
+          if (!treeMatMap.has(name)) treeMatMap.set(name, mat);
+        });
+      }
+    });
+    treeMatMap.forEach((mat, name) => addMatFolder(treeSection, mat, name));
+    treeSection.open();
+
+    // --- Ornament materials ---
+    const ornGroup = ornamentGroupRef.current;
+    if (ornGroup.children.length > 0) {
+      const ornSection = gui.addFolder('Ornaments');
+      const ornMatMap = new Map<string, THREE.MeshStandardMaterial>();
+      ornGroup.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          mats.forEach((m) => {
+            const mat = m as THREE.MeshStandardMaterial;
+            if (!mat.isMeshStandardMaterial) return;
+            const name = mat.name || mat.uuid.slice(0, 8);
+            if (!ornMatMap.has(name)) ornMatMap.set(name, mat);
+          });
+        }
+      });
+      ornMatMap.forEach((mat, name) => addMatFolder(ornSection, mat, name));
+      ornSection.close();
+    }
+
+    return () => {
+      if (guiRef.current) {
+        guiRef.current.destroy();
+        guiRef.current = null;
+      }
+    };
+  }, [treeReady, ornamentPaths, ornamentCount]);
+
+  // ---- Loading progress bar ----
+  const progressPercent = typeof loadProgress === 'number' ? Math.round(loadProgress) : null;
+  const isIndeterminate = loadProgress === 'indeterminate';
+  const showBar = loadProgress !== null;
+
+  return (
+    <div ref={mountRef} className="w-full h-full relative">
+      {showBar && (
+        <div
+          className="absolute inset-0 flex items-center justify-center z-10 transition-opacity duration-300"
+          style={{ opacity: progressPercent === 100 ? 0 : 1, pointerEvents: 'none' }}
+        >
+          <div className="w-[300px] h-[8px] bg-gray-200 rounded-full overflow-hidden relative">
+            {isIndeterminate ? (
+              <div
+                className="h-full bg-blue-500 rounded-full animate-pulse"
+                style={{ width: '60%', marginLeft: '20%' }}
+              />
+            ) : (
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-200 ease-out"
+                style={{ width: `${progressPercent}%` }}
+              />
+            )}
+            <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-gray-600 leading-none"
+              style={{ top: '12px' }}>
+              {isIndeterminate ? '로딩 중...' : `${progressPercent}%`}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
