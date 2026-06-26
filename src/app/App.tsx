@@ -32,6 +32,171 @@ const ORNAMENT_CONFIG: { path: string; qty: number }[] = [
   { path: '/models/Silver_Filigree_Duck.glb', qty: 2 },
 ];
 
+// ============================================================================
+// LIGHT RECOMMENDATION TABLES
+// Two parallel lookups feed the wrap-mode buttons:
+//   1. SCENE_COUNT_TABLE (#트리 PDF) — bulbs to RENDER in the viewport
+//   2. CART_SET_COUNT_TABLE (#전구 PDF) — sets to BUY (cart row qty multiplier)
+// Decoupled by design: a 150cm 스케치 with 쥬얼라이트 RENDERS 800 bulbs but the
+// product comes in 500구 strings, so the cart buys 2 sets (= 1000 actual).
+// ============================================================================
+
+type LightFamily = 'wire' | 'led' | 'cluster';
+type TreeColorGroup = 'fishbone' | 'sketch-olive' | 'sketch-pink' | 'deperse';
+type WrapKey = 'front' | '360' | '360-dense';
+
+// Tree slot id → color/family group used as #트리 row key.
+// 더퍼스트 (2) is 'deperse' — the table has all dashes, so any lookup → 0.
+const TREE_COLOR_GROUP: Record<number, TreeColorGroup> = {
+  1: 'fishbone',      // 피시본 트리 — 그린/투톤 (same numbers as sketch-olive per #트리)
+  2: 'deperse',       // 더퍼스트 트리 — table empty
+  3: 'sketch-olive',  // 스케치 트리 (올리브/스노우)
+  4: 'sketch-pink',   // 스케치 트리 (핑크/로즈) — no 120cm row
+};
+
+// Light product (selectedLight 1-5) → which #트리 column to use.
+// Cluster has no "촘촘" column; LED collapses all wraps into one column.
+const LIGHT_FAMILY: Record<number, LightFamily> = {
+  1: 'wire',     // 팝팝
+  2: 'wire',     // 파스텔팝
+  3: 'led',      // 쥬얼라이트 (RGB)
+  4: 'cluster',  // 클러스터
+  5: 'wire',     // 좁쌀
+};
+
+// #트리 PDF — scene bulb counts. Shared base for fishbone + sketch-olive (identical rows).
+// Cluster's '360-dense' = '360' (no distinct column in source).
+// LED's three wrap entries are identical (single column).
+const SCENE_COUNTS_BASE: Record<string, Record<LightFamily, Record<WrapKey, number>>> = {
+  '120cm': {
+    led:     { front: 500,  '360': 500,  '360-dense': 500 },
+    wire:    { front: 500,  '360': 500,  '360-dense': 800 },
+    cluster: { front: 1000, '360': 1000, '360-dense': 1000 },
+  },
+  '150cm': {
+    led:     { front: 800,  '360': 800,  '360-dense': 800 },
+    wire:    { front: 1000, '360': 1000, '360-dense': 1200 },
+    cluster: { front: 1000, '360': 1000, '360-dense': 1000 },
+  },
+  '180cm': {
+    led:     { front: 1500, '360': 1500, '360-dense': 1500 },
+    wire:    { front: 1500, '360': 1500, '360-dense': 2000 },
+    cluster: { front: 2000, '360': 2000, '360-dense': 2000 },
+  },
+  '210cm': {
+    led:     { front: 2000, '360': 2000, '360-dense': 2000 },
+    wire:    { front: 2000, '360': 2000, '360-dense': 3000 },
+    cluster: { front: 3000, '360': 3000, '360-dense': 3000 },
+  },
+};
+
+const SCENE_COUNT_TABLE: Record<TreeColorGroup, Record<string, Record<LightFamily, Record<WrapKey, number>>> | null> = {
+  'fishbone':     SCENE_COUNTS_BASE,
+  'sketch-olive': SCENE_COUNTS_BASE,
+  'sketch-pink':  { // No 120cm — that row gets pruned via the size selector already
+    '150cm': SCENE_COUNTS_BASE['150cm'],
+    '180cm': SCENE_COUNTS_BASE['180cm'],
+    '210cm': SCENE_COUNTS_BASE['210cm'],
+  },
+  'deperse': null, // 더퍼스트 — empty in source, returns 0 for all lookups
+};
+
+/** Returns the recommended scene-render bulb count from #트리. Returns 0 when no data. */
+function getSceneBulbCount(treeId: number, size: string, lightId: number, wrap: WrapKey): number {
+  const group = TREE_COLOR_GROUP[treeId];
+  const family = LIGHT_FAMILY[lightId];
+  if (!group || !family) return 0;
+  const groupTable = SCENE_COUNT_TABLE[group];
+  if (!groupTable) return 0;
+  return groupTable[size]?.[family]?.[wrap] ?? 0;
+}
+
+// #전구 PDF — sets to buy per (light, qty-per-unit, size, wrap).
+// Wire products: 3 wrap modes. LED + Cluster: collapsed (same number for all 3 wraps).
+const CART_SET_COUNT_TABLE: Record<number, Record<number, Record<string, Record<WrapKey, number>>>> = {
+  1: { // 팝팝
+    200: {
+      '120cm': { front: 3, '360': 3, '360-dense': 4 },
+      '150cm': { front: 5, '360': 5, '360-dense': 6 },
+      '180cm': { front: 8, '360': 8, '360-dense': 10 },
+      '210cm': { front: 10, '360': 10, '360-dense': 15 },
+    },
+    500: {
+      '120cm': { front: 1, '360': 1, '360-dense': 2 },
+      '150cm': { front: 2, '360': 2, '360-dense': 3 },
+      '180cm': { front: 3, '360': 3, '360-dense': 4 },
+      '210cm': { front: 4, '360': 4, '360-dense': 6 },
+    },
+  },
+  2: { // 파스텔팝
+    500: {
+      '120cm': { front: 1, '360': 1, '360-dense': 2 },
+      '150cm': { front: 2, '360': 2, '360-dense': 3 },
+      '180cm': { front: 3, '360': 3, '360-dense': 4 },
+      '210cm': { front: 4, '360': 4, '360-dense': 6 },
+    },
+  },
+  3: { // 쥬얼라이트 — wrap doesn't matter (single column collapsed)
+    500: {
+      '120cm': { front: 1, '360': 1, '360-dense': 1 },
+      '150cm': { front: 2, '360': 2, '360-dense': 2 },
+      '180cm': { front: 3, '360': 3, '360-dense': 3 },
+      '210cm': { front: 4, '360': 4, '360-dense': 4 },
+    },
+    1000: {
+      '120cm': { front: 1, '360': 1, '360-dense': 1 },
+      '150cm': { front: 1, '360': 1, '360-dense': 1 },
+      '180cm': { front: 2, '360': 2, '360-dense': 2 },
+      '210cm': { front: 2, '360': 2, '360-dense': 2 },
+    },
+  },
+  4: { // 클러스터 — no 촘촘 column; '360-dense' collapses to '360' value
+    1000: {
+      '120cm': { front: 1, '360': 1, '360-dense': 1 },
+      '150cm': { front: 1, '360': 1, '360-dense': 1 },
+      '180cm': { front: 2, '360': 2, '360-dense': 2 },
+      '210cm': { front: 3, '360': 3, '360-dense': 3 },
+    },
+  },
+  5: { // 좁쌀
+    100: {
+      '120cm': { front: 5, '360': 5, '360-dense': 8 },
+      '150cm': { front: 10, '360': 10, '360-dense': 12 },
+      '180cm': { front: 15, '360': 15, '360-dense': 20 },
+      '210cm': { front: 20, '360': 20, '360-dense': 30 },
+    },
+    200: {
+      '120cm': { front: 3, '360': 3, '360-dense': 4 },
+      '150cm': { front: 5, '360': 5, '360-dense': 6 },
+      '180cm': { front: 8, '360': 8, '360-dense': 10 },
+      '210cm': { front: 10, '360': 10, '360-dense': 15 },
+    },
+    300: {
+      '120cm': { front: 2, '360': 2, '360-dense': 3 },
+      '150cm': { front: 4, '360': 4, '360-dense': 4 },
+      '180cm': { front: 5, '360': 5, '360-dense': 7 },
+      '210cm': { front: 7, '360': 7, '360-dense': 10 },
+    },
+    500: {
+      '120cm': { front: 1, '360': 1, '360-dense': 2 },
+      '150cm': { front: 2, '360': 2, '360-dense': 3 },
+      '180cm': { front: 3, '360': 3, '360-dense': 4 },
+      '210cm': { front: 4, '360': 4, '360-dense': 6 },
+    },
+    1000: {
+      '120cm': { front: 1, '360': 1, '360-dense': 1 },
+      '150cm': { front: 1, '360': 1, '360-dense': 2 },
+      '180cm': { front: 2, '360': 2, '360-dense': 2 },
+      '210cm': { front: 2, '360': 2, '360-dense': 3 },
+    },
+  },
+};
+
+/** Returns the recommended number of SKU units (sets) to buy from #전구. 0 when no data. */
+function getCartSetCount(lightId: number, qtyUnit: number, size: string, wrap: WrapKey): number {
+  return CART_SET_COUNT_TABLE[lightId]?.[qtyUnit]?.[size]?.[wrap] ?? 0;
+}
+
 const ToolbarButton = ({ icon: Icon, label, onClick }: { icon: any, label: string, onClick: () => void }) => (
   <Tooltip.Root delayDuration={300}>
     <Tooltip.Trigger asChild>
@@ -76,6 +241,10 @@ export default function App() {
   const cartUidRef = useRef(1);
   const nextUid = () => cartUidRef.current++;
   const [cartJingle, setCartJingle] = useState(false);
+
+  // 더퍼스트 (treeId=2) is 전구 일체형 — built-in baked lights, no additional light products allowed.
+  // Surfaces a modal when the user tries to interact with any light item on page 2.
+  const [showDeperseAlert, setShowDeperseAlert] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const totalPages = 4;
 
@@ -116,19 +285,23 @@ export default function App() {
         '혼합색': ['#fff5cc', '#fff5cc', '#fff5cc', '#b8d4e8'],
       },
     },
-    2: { // 파스텔팝 — pastel RGB (pink/mint/sky), cycled around the tree
+    2: { // 파스텔팝 — warm-white center with orange/green/purple harmoniously mixed (per #전구 PDF note)
       qty: ['500구'], bulbColor: ['파스텔톤'], wireColor: ['녹색', '투명'],
       thumbnailKey: 'wireColor',
       thumbnails: { '녹색': '/thumbnails/lights/pastelpop_light_green.webp', '투명': '/thumbnails/lights/pastelpop_light_trans.webp' },
       colorsByBulbColor: {
-        '파스텔톤': ['#ff8a9a', '#a8e6a3', '#9ec5ff'],
+        // 6-cycle: 3 warm + 1 each accent → 50% warm, 16.7% each accent
+        '파스텔톤': ['#fff5cc', '#ff9a3d', '#fff5cc', '#7fcc7f', '#fff5cc', '#b48dd6'],
       },
     },
-    3: { // 쥬얼라이트 — static thumbnail
+    3: { // 쥬얼라이트 (RGB) — warm + 다홍(scarlet) per #전구 PDF note
       qty: ['500구', '1000구'], bulbColor: ['전구색'], wireColor: ['녹색'],
       thumbnailKey: null,
       thumbnails: { '_default': '/thumbnails/lights/jewel_light_color.jpg' },
-      colorsByBulbColor: { '전구색': ['#fff5cc'] },
+      colorsByBulbColor: {
+        // 4-cycle: 75% warm + 25% scarlet ("다홍 빛이 부분적으로 섞여")
+        '전구색': ['#fff5cc', '#fff5cc', '#fff5cc', '#e63946'],
+      },
     },
     4: { // 클러스터 — thumbnail changes by 선 색상
       qty: ['1000구'], bulbColor: ['전구색'], wireColor: ['녹색', '투명'],
@@ -225,15 +398,24 @@ export default function App() {
     [selectedLight, lightBulbColor],
   );
 
-  // Sync light wrap mode with 장식 범위 (Step 1 selector):
-  // front-only → force 'front'; 360 → default to '360' (보통) but keep '360-dense' if already chosen.
+  // Sync light wrap mode with 장식 범위 (Step 1 selector) AND with the selected light family:
+  //   - front-only → force 'front'
+  //   - 360 mode → 'front' becomes '360'; '360-dense' demotes to '360' if the new family
+  //     doesn't expose a 촘촘 option (LED / cluster).
   useEffect(() => {
+    const family = selectedLight > 0 ? LIGHT_FAMILY[selectedLight] : null;
     if (frontOnlyMode) {
       setLightWrapMode('front');
-    } else {
-      setLightWrapMode((prev) => (prev === 'front' ? '360' : prev));
+      return;
     }
-  }, [frontOnlyMode]);
+    setLightWrapMode((prev) => {
+      let next: WrapKey = prev === 'front' ? '360' : prev;
+      if (next === '360-dense' && (family === 'led' || family === 'cluster')) {
+        next = '360';
+      }
+      return next;
+    });
+  }, [frontOnlyMode, selectedLight]);
 
   // Per-tree size + color options. Drives both the Step 1 selectors and the cart commit snapshot.
   //   sizes: string[] of cm-stripped labels (e.g. '150') — UI suffixes 'cm' for display + state
@@ -338,6 +520,9 @@ export default function App() {
       if (!selectedLight) return;
       const lightNames: Record<number, string> = { 1: '팝팝', 2: '파스텔팝', 3: '쥬얼라이트', 4: '클러스터', 5: '좁쌀' };
       const baseName = lightNames[selectedLight] || `Light ${selectedLight}`;
+      // Cart qty = recommended SKU set count from #전구 PDF. Frozen at commit time.
+      // Falls back to 1 when no recommendation is on file (e.g. an unmapped size/wrap combo).
+      const setCount = getCartSetCount(selectedLight, lightCount, selectedSize, lightWrapMode) || 1;
       candidate = {
         uid: nextUid(),
         kind: 'light',
@@ -348,7 +533,7 @@ export default function App() {
         palette: lightColors,
         name: `${baseName} ${lightQuantity} ${lightBulbColor}`,
         thumbnail: getLightThumbnail(selectedLight),
-        qty: 1,
+        qty: setCount,
       };
     } else if (currentPage === 3) {
       if (!selectedOrnament) return;
@@ -506,30 +691,43 @@ export default function App() {
   // visually duplicates a freshly-committed row.
 
   // Lights: one layer per cart row + (optional) preview layer for the current panel selection.
-  // Scene scatters each layer independently; total bulbs = sum(layer.bulbCount × layer.units).
+  // Scene bulb counts come from the #트리 recommendation table — NOT the cart row's purchase
+  // count. The cart row stores SKU info (qty unit + set multiplier) for purchase; the scene
+  // renders whatever the table says looks right for current (tree, size, family, wrap).
+  //
+  // Reactive: any change to tree/size/wrap re-derives the scene count for every layer
+  // (Q4 = re-apply). Cart purchase numbers stay frozen at commit time.
   type LightLayer = { layerId: string; lightId: number; bulbCount: number; palette: string[] };
   const lightLayers = useMemo<LightLayer[]>(() => {
+    // 더퍼스트 — 전구 일체형 (built-in baked lights). Hard gate: no add-on lights render
+    // regardless of cart contents. When the real 더퍼스트 model lands, its lights will
+    // already be part of the GLB.
+    if (selectedTree === 2) return [];
     const layers: LightLayer[] = [];
     cartItems.forEach(item => {
       if (item.kind !== 'light') return;
-      // qty represents the "unit multiplier" — committing 좁쌀 1000구 twice → qty=2 → 2000 bulbs.
+      const bulbCount = getSceneBulbCount(selectedTree, selectedSize, item.lightId, lightWrapMode);
+      if (bulbCount <= 0) return; // no #트리 data (e.g. 더퍼스트) → skip rendering
       layers.push({
         layerId: `cart-${item.uid}`,
         lightId: item.lightId,
-        bulbCount: item.bulbCount * item.qty,
+        bulbCount,
         palette: item.palette,
       });
     });
-    if (selectedLight > 0 && lightCount > 0) {
-      layers.push({
-        layerId: 'preview',
-        lightId: selectedLight,
-        bulbCount: lightCount,
-        palette: lightColors,
-      });
+    if (selectedLight > 0) {
+      const bulbCount = getSceneBulbCount(selectedTree, selectedSize, selectedLight, lightWrapMode);
+      if (bulbCount > 0) {
+        layers.push({
+          layerId: 'preview',
+          lightId: selectedLight,
+          bulbCount,
+          palette: lightColors,
+        });
+      }
     }
     return layers;
-  }, [cartItems, selectedLight, lightCount, lightColors]);
+  }, [cartItems, selectedLight, lightColors, selectedTree, selectedSize, lightWrapMode]);
 
   // Bead string: active when any committed or preview layer references ornament#1.
   // Single instance regardless of stack depth — they'd all render at the same origin point.
@@ -1375,9 +1573,13 @@ export default function App() {
                        ].map(({ name: lightName, defaultImg }, i) => {
                          const lightImg = selectedLight === i + 1 ? getLightThumbnail(i + 1) : defaultImg;
                          return (
-                         <button 
+                         <button
                            key={i}
-                           onClick={() => setSelectedLight(prev => prev === i + 1 ? 0 : i + 1)}
+                           onClick={() => {
+                             // 더퍼스트 (전구 일체형) — block any light selection and surface modal
+                             if (selectedTree === 2) { setShowDeperseAlert(true); return; }
+                             setSelectedLight(prev => prev === i + 1 ? 0 : i + 1);
+                           }}
                            className={`group relative flex flex-col rounded-xl overflow-hidden transition-all shadow-sm border-2 ${selectedLight === i + 1 ? 'border-blue-500 bg-blue-500' : 'border-transparent bg-white'}`}
                          >
                            {/* Checkbox (Top Right) */}
@@ -1411,63 +1613,80 @@ export default function App() {
                    {/* Fixed Bottom Section: Colors, Sizes, Buttons */}
                    <div className="shrink-0 max-h-[20vh] overflow-y-auto custom-scrollbar p-4 bg-gray-50/50 flex flex-col gap-5">
                      
-                     {/* Light Wrap Mode — depends on 장식 범위 from Step 1.
-                         front-only → single "앞면" option; 360 → "360도" + "360도 촘촘". */}
+                     {/* Light Wrap Mode — recommendation-driven.
+                         Buttons shown depend on the selected light's FAMILY:
+                           - wire (팝팝/파스텔팝/좁쌀): front=[앞면], 360=[360도, 360도 촘촘]
+                           - led (쥬얼라이트):           front=[앞면], 360=[360도]
+                           - cluster:                  front=[앞면], 360=[360도]
+                         Clicking sets lightWrapMode → scene re-scatters with #트리 recommendation
+                         for current (tree, size, family, wrap). Hover tooltip shows scene count
+                         + cart set count for the current (light, qty, size, wrap). */}
                      <div className="space-y-2.5">
                        <h4 className="text-sm font-bold text-slate-600 flex items-center gap-1.5">
                          <Lightbulb className="size-4" /> 전구 감기 옵션
                        </h4>
-                       {frontOnlyMode ? (
-                         <div className="grid grid-cols-1 gap-2">
-                           <button
-                             onClick={() => setLightWrapMode('front')}
-                             className="relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-white border-2 border-blue-500 shadow-sm"
-                           >
-                             <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
-                               <TreePine className="size-5 text-slate-600" />
-                             </div>
-                             <div className="text-left flex-1">
-                               <div className="text-sm font-semibold text-slate-800">앞면</div>
-                             </div>
-                             <Check className="size-4 text-blue-500" />
-                           </button>
-                         </div>
-                       ) : (
-                         <div className="grid grid-cols-2 gap-2">
-                           <button
-                             onClick={() => setLightWrapMode('360')}
-                             className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-white ${
-                               lightWrapMode === '360'
-                                 ? 'border-2 border-blue-500 shadow-sm'
-                                 : 'border-2 border-slate-200 hover:border-slate-300'
-                             }`}
-                           >
-                             <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
-                               <LayoutGrid className="size-5 text-slate-600" />
-                             </div>
-                             <div className="text-left flex-1">
-                               <div className="text-sm font-semibold text-slate-800">360도</div>
-                             </div>
-                             {lightWrapMode === '360' && <Check className="size-4 text-blue-500" />}
-                           </button>
-                           <button
-                             onClick={() => setLightWrapMode('360-dense')}
-                             className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-white ${
-                               lightWrapMode === '360-dense'
-                                 ? 'border-2 border-blue-500 shadow-sm'
-                                 : 'border-2 border-slate-200 hover:border-slate-300'
-                             }`}
-                           >
-                             <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
-                               <Grip className="size-5 text-slate-600" />
-                             </div>
-                             <div className="text-left flex-1">
-                               <div className="text-sm font-semibold text-slate-800">360도 촘촘</div>
-                             </div>
-                             {lightWrapMode === '360-dense' && <Check className="size-4 text-blue-500" />}
-                           </button>
-                         </div>
-                       )}
+                       {(() => {
+                         const family = selectedLight > 0 ? LIGHT_FAMILY[selectedLight] : null;
+                         // Non-front options vary by family. Default (no light selected) = wire layout.
+                         const non360: Array<{ key: WrapKey; label: string; icon: any }> =
+                           family === 'led' || family === 'cluster'
+                             ? [{ key: '360', label: '360도', icon: LayoutGrid }]
+                             : [
+                                 { key: '360', label: '360도', icon: LayoutGrid },
+                                 { key: '360-dense', label: '360도 촘촘', icon: Grip },
+                               ];
+                         const items = frontOnlyMode
+                           ? [{ key: 'front' as WrapKey, label: '앞면', icon: TreePine }]
+                           : non360;
+                         const tooltipFor = (wrap: WrapKey) => {
+                           if (!selectedLight) return '전구를 먼저 선택해주세요';
+                           const scene = getSceneBulbCount(selectedTree, selectedSize, selectedLight, wrap);
+                           if (scene === 0) return '추천 데이터 없음 (해당 트리·사이즈)';
+                           const sets = getCartSetCount(selectedLight, lightCount, selectedSize, wrap);
+                           const total = sets * lightCount;
+                           return `권장구수: ${scene}개  ·  구매: ${sets || '?'}세트${sets ? ` (${total}개)` : ''}`;
+                         };
+                         const cols = items.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
+                         return (
+                           <div className={`grid ${cols} gap-2`}>
+                             {items.map(({ key, label, icon: Icon }) => {
+                               const isActive = lightWrapMode === key;
+                               return (
+                                 <Tooltip.Root key={key} delayDuration={300}>
+                                   <Tooltip.Trigger asChild>
+                                     <button
+                                       onClick={() => setLightWrapMode(key)}
+                                       className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-white ${
+                                         isActive
+                                           ? 'border-2 border-blue-500 shadow-sm'
+                                           : 'border-2 border-slate-200 hover:border-slate-300'
+                                       }`}
+                                     >
+                                       <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+                                         <Icon className="size-5 text-slate-600" />
+                                       </div>
+                                       <div className="text-left flex-1">
+                                         <div className="text-sm font-semibold text-slate-800">{label}</div>
+                                       </div>
+                                       {isActive && <Check className="size-4 text-blue-500" />}
+                                     </button>
+                                   </Tooltip.Trigger>
+                                   <Tooltip.Portal>
+                                     <Tooltip.Content
+                                       className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg shadow-xl z-50 select-none animate-in fade-in-0 zoom-in-95"
+                                       sideOffset={5}
+                                       side="top"
+                                     >
+                                       {tooltipFor(key)}
+                                       <Tooltip.Arrow className="fill-gray-900" />
+                                     </Tooltip.Content>
+                                   </Tooltip.Portal>
+                                 </Tooltip.Root>
+                               );
+                             })}
+                           </div>
+                         );
+                       })()}
                      </div>
 
                      {/* 구수 선택 */}
@@ -1806,6 +2025,40 @@ export default function App() {
           </div>
         </motion.div>
       </div>
+
+      {/* 더퍼스트 전구 일체형 알림 — fires on any light item click while tree 2 is selected */}
+      <AnimatePresence>
+        {showDeperseAlert && (
+          <motion.div
+            key="deperse-alert"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowDeperseAlert(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl px-6 py-5 max-w-sm w-[90%] shadow-2xl"
+            >
+              <p className="text-slate-800 text-sm leading-relaxed mb-4 text-center">
+                더퍼스트 트리는 전구 일체형으로<br />전구 추가 선택이 불가합니다.
+              </p>
+              <button
+                onClick={() => setShowDeperseAlert(false)}
+                className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 active:scale-[0.98] transition-all"
+              >
+                확인
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </Tooltip.Provider>
   );
 }

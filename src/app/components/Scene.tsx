@@ -486,7 +486,7 @@ export default function Scene({
     bloomComposer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(container.clientWidth, container.clientHeight),
-      0.92,  // strength
+      0.8,  // strength
       1.0,   // radius
       0.0,   // threshold
     );
