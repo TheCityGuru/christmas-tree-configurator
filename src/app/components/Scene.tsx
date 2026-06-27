@@ -1055,6 +1055,31 @@ export default function Scene({
           });
         });
 
+        // Twotone fishbone accent override — the authored `Material.005` baseColor is
+        // nearly identical to the base `Material` (#0d1104 vs #030d03), so the intended
+        // two-tone effect is imperceptible. Hard-set Material.005 to a brighter olive
+        // (#5d8132) so the 믹스 투톤 variant actually reads as multi-tone in the viewport.
+        // Scoped by `twotone` substring → green variants untouched.
+        // (Three.js GLTFLoader may either preserve or strip the dot from material names,
+        // so match both 'Material.005' and 'Material005'.)
+        if (treeModelPath.includes('twotone')) {
+          const accentColor = new THREE.Color('#5d8132');
+          model.traverse((child) => {
+            if (!(child as THREE.Mesh).isMesh) return;
+            const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
+            const mats = Array.isArray(mat) ? mat : [mat];
+            mats.forEach((m) => {
+              if (!m?.color) return;
+              if (m.name === 'Material.005' || m.name === 'Material005') {
+                m.color.copy(accentColor);
+                m.needsUpdate = true;
+                // Ensure this accent doesn't get swept up by the foliage recolor effect later
+                m.userData.isFoliage = false;
+              }
+            });
+          });
+        }
+
         treeGroup.add(model);
         loadedModelRef.current = model;
         setTreeReady((n) => n + 1); // signal ornament effect to re-run
@@ -1355,9 +1380,13 @@ export default function Scene({
   // The old hue gate was stateful: after switching to a non-greenish color (e.g. 스노우),
   // the gate could never reverse the change. treeReady is in deps so newly loaded trees
   // pick up the current treeColor immediately.
+  //
+  // When treeColor is undefined (App passes `undefined` for variant-specific GLBs whose
+  // authored materials should be preserved — e.g. fishbone twotone), skip recoloring entirely
+  // so the authored multi-tone look survives.
   useEffect(() => {
     const target = loadedModelRef.current;
-    if (!target) return;
+    if (!target || !treeColor) return;
 
     const color = new THREE.Color(treeColor);
     target.traverse((child) => {

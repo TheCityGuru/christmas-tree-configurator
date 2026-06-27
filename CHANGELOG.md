@@ -6,6 +6,36 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-06-27 (afternoon) — Variant coverage, twotone accent, tree 4 sketchTree mapping
+
+### Variant-specific GLB skips treeColor tint
+- App.tsx Scene prop logic: when `treeVariantModels[treeId-size-color]` returns a hit, pass `treeColor={undefined}`. Scene's recolor effect short-circuits on `!treeColor`, preserving authored materials.
+- Only fallback paths get tinted — sketch snow at 120/150/210cm (uses olive150) + tree 4 (uses sketch olive per size).
+- Fixes "fishbone twotone shows no difference from green" — was being overwritten by recolor.
+
+### Twotone Material.005 accent override (code-side)
+- Investigation: twotone fishbone GLBs differ from green only by `Material.005` baseColor `#0d1104` vs base `#030d03`. Both near-black, visual difference imperceptible. Base "Material" greenness comes from per-vertex COLOR_0 attrs, not baseColor.
+- Fix in `Scene.tsx` tree-load callback: when `treeModelPath.includes('twotone')`, hard-override `Material.005`'s color to `#5d8132` (brighter olive). Tagged `userData.isFoliage = false` so the foliage recolor doesn't sweep it.
+- Match both `'Material.005'` and `'Material005'` (Three.js GLTFLoader is inconsistent about stripping dots from material names).
+
+### Fishbone variant fleet — 100% coverage
+- Added `green210` + `twotone210` GLBs. 피시본 now has all 8 (size × color) combos (120/150/180/210cm × 그린/믹스 투톤).
+
+### Sketch variant fleet — partial coverage
+- Added `sketchTree_olive120/210.glb` + `sketchTree_white120.glb`.
+- 스케치 트리(올리브/스노우) status: olive all 4 sizes ✓; snow 120cm ✓ + snow 180cm ✓; snow 150cm + snow 210cm still fall back to olive150 + #f0f0f0 tint.
+
+### Tree 4 (스케치 핑크/로즈) now uses sketchTree models
+- New `treeSizeFallbackModels` layer between `treeVariantModels` and `treeDefaultModel`.
+- Tree 4 at 150/180/210cm now resolves to the sketchTree olive GLB of matching size, then gets tinted to pink or rose via the foliage recolor.
+- Was previously falling back to `ultimate_tree_v2_test.glb` (fishbone-style) regardless of size — now uses the visually correct sketch shape.
+
+### Color tuning
+- 핑크: `#ffc0cb` → `#f7d4da` (softer pale pink)
+- 로즈: `#c64073` → `#d10050` (bold magenta-rose)
+
+---
+
 ## 2026-06-27 — Fishbone variant fleet + scatter robustness + color-swap bug fix
 
 ### New tree GLBs

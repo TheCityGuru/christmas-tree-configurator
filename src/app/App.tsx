@@ -455,8 +455,8 @@ export default function App() {
     4: { // 스케치 트리(핑크/로즈)
       sizes: ['150', '180', '210'],
       colors: [
-        { name: 'pink', label: '핑크', swatch: { kind: 'solid', color: '#ffc0cb' }, sceneColor: '#ffc0cb' },
-        { name: 'rose', label: '로즈', swatch: { kind: 'solid', color: '#c64073' }, sceneColor: '#c64073' },
+        { name: 'pink', label: '핑크', swatch: { kind: 'solid', color: '#f7d4da' }, sceneColor: '#f7d4da' },
+        { name: 'rose', label: '로즈', swatch: { kind: 'solid', color: '#d10050' }, sceneColor: '#d10050' },
       ],
     },
   };
@@ -617,18 +617,33 @@ export default function App() {
     '1-150cm-mix':   '/models/trees/fishboneTree_twotone150.glb',
     '1-180cm-olive': '/models/trees/fishboneTree_green180.glb',
     '1-180cm-mix':   '/models/trees/fishboneTree_twotone180.glb',
+    '1-210cm-olive': '/models/trees/fishboneTree_green210.glb',
+    '1-210cm-mix':   '/models/trees/fishboneTree_twotone210.glb',
+    '3-120cm-olive': '/models/trees/sketchTree_olive120.glb',
+    '3-120cm-snow':  '/models/trees/sketchTree_white120.glb',
     '3-150cm-olive': '/models/trees/sketchTree_olive150.glb',
     '3-180cm-olive': '/models/trees/sketchTree_olive180.glb',
     '3-180cm-snow':  '/models/trees/sketchTree_white180.glb',
+    '3-210cm-olive': '/models/trees/sketchTree_olive210.glb',
+  };
+  // Per-(tree, size) shared fallback — used when no color-specific variant exists but the tree
+  // wants to swap the base model by size. Tree 4 (스케치 핑크/로즈) reuses sketchTree olive GLBs
+  // at the right size, then the treeColor tint (#ffc0cb / #c64073) gets applied on top to
+  // differentiate pink vs rose visually.
+  const treeSizeFallbackModels: Record<string, string> = {
+    '4-150cm': '/models/trees/sketchTree_olive150.glb',
+    '4-180cm': '/models/trees/sketchTree_olive180.glb',
+    '4-210cm': '/models/trees/sketchTree_olive210.glb',
   };
   const treeDefaultModel: Record<number, string> = {
     1: '/models/trees/fishboneTree_green150.glb',
     2: '/models/trees/fishboneTree_green150.glb', // placeholder until 더퍼스트 트리 model arrives
     3: '/models/trees/sketchTree_olive150.glb',
-    4: '/models/trees/ultimate_tree_v2_test.glb',
+    4: '/models/trees/sketchTree_olive150.glb',   // global fallback if size-specific entry missing
   };
   const resolveTreeModel = (treeId: number, size: string, color: string): string => {
     return treeVariantModels[`${treeId}-${size}-${color}`]
+        || treeSizeFallbackModels[`${treeId}-${size}`]
         || treeDefaultModel[treeId]
         || '/models/trees/fishboneTree_green150.glb';
   };
@@ -772,7 +787,16 @@ export default function App() {
           <div className="absolute inset-0 z-0">
             <Scene
               treeModelPath={resolveTreeModel(selectedTree, selectedSize, selectedColor)}
-              treeColor={treeOptionsMap[selectedTree]?.colors.find(c => c.name === selectedColor)?.sceneColor || '#2d5a27'}
+              // Only apply a foliage tint when we're rendering the fallback default model.
+              // When a variant-specific GLB exists for this (treeId, size, color), its authored
+              // materials already encode the look (e.g. fishbone twotone has multi-toned greens) —
+              // tinting would flatten them. Sketch at non-180 sizes shares one fallback GLB across
+              // both olive/snow, so the tint is what differentiates the two visually.
+              treeColor={
+                treeVariantModels[`${selectedTree}-${selectedSize}-${selectedColor}`]
+                  ? undefined
+                  : (treeOptionsMap[selectedTree]?.colors.find(c => c.name === selectedColor)?.sceneColor || '#2d5a27')
+              }
               lightMode={lightMode}
               ornamentConfig={scaledOrnamentConfig}
               rearrangeMode={rearrangeMode || adminPlacementMode}
