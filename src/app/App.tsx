@@ -38,8 +38,144 @@ const ORNAMENT_SET_1: OrnamentSet = [
   { path: '/models/Silver_Filigree_Duck.glb', qty: 2 },
 ];
 
-// 리치엘빈 70pcs — 20 GLBs summing to exactly 70 pieces. Draco-compressed with shared textures
-// (~20 MB total on disk vs 316 MB before compression).
+// 겨울숲 20pcs — 7 GLBs summing to exactly 20 pieces. WebP-compressed (~10 MB total on disk).
+const ORNAMENT_SET_4: OrnamentSet = [
+  { path: '/models/ornaments/winter_forrest/1.glb', qty: 4 },
+  { path: '/models/ornaments/winter_forrest/2.glb', qty: 2 },
+  { path: '/models/ornaments/winter_forrest/3.glb', qty: 2 },
+  { path: '/models/ornaments/winter_forrest/4.glb', qty: 3 },
+  { path: '/models/ornaments/winter_forrest/5.glb', qty: 3 },
+  { path: '/models/ornaments/winter_forrest/6.glb', qty: 3 },
+  { path: '/models/ornaments/winter_forrest/7.glb', qty: 3 },
+];
+
+// 레인보우캔디샵 70pcs — 28 GLBs summing to 73 pieces (label ~70 nominal). WebP-compressed (~59 MB on disk).
+const ORNAMENT_SET_2: OrnamentSet = [
+  { path: '/models/ornaments/candy_shop/Blue_and_White_Stripe.glb',       qty: 6 },
+  { path: '/models/ornaments/candy_shop/blue_glitter.glb',                qty: 2 },
+  { path: '/models/ornaments/candy_shop/Candy_cane1.glb',                 qty: 6 },
+  { path: '/models/ornaments/candy_shop/Candy_cane2.glb',                 qty: 6 },
+  { path: '/models/ornaments/candy_shop/Candy_cane3.glb',                 qty: 6 },
+  { path: '/models/ornaments/candy_shop/cupcake1.glb',                    qty: 1 },
+  { path: '/models/ornaments/candy_shop/cupcake2.glb',                    qty: 1 },
+  { path: '/models/ornaments/candy_shop/cupcake3.glb',                    qty: 1 },
+  { path: '/models/ornaments/candy_shop/cupcake4.glb',                    qty: 1 },
+  { path: '/models/ornaments/candy_shop/cupcake5.glb',                    qty: 1 },
+  { path: '/models/ornaments/candy_shop/cupcake6.glb',                    qty: 1 },
+  { path: '/models/ornaments/candy_shop/cupcake7.glb',                    qty: 2 },
+  { path: '/models/ornaments/candy_shop/cupcake8.glb',                    qty: 2 },
+  { path: '/models/ornaments/candy_shop/lollipop.glb',                    qty: 2 },
+  { path: '/models/ornaments/candy_shop/macaron.glb',                     qty: 4 },
+  { path: '/models/ornaments/candy_shop/macaron2.glb',                    qty: 2 },
+  { path: '/models/ornaments/candy_shop/macaron3.glb',                    qty: 4 },
+  { path: '/models/ornaments/candy_shop/metal_donut.glb',                 qty: 2 },
+  { path: '/models/ornaments/candy_shop/metal_donut2.glb',                qty: 2 },
+  { path: '/models/ornaments/candy_shop/metal_donut3.glb',                qty: 2 },
+  { path: '/models/ornaments/candy_shop/Pink_and_White.glb',              qty: 6 },
+  { path: '/models/ornaments/candy_shop/popsicle.glb',                    qty: 2 },
+  { path: '/models/ornaments/candy_shop/Sprinkle_covered_ornament.glb',   qty: 3 },
+  { path: '/models/ornaments/candy_shop/sprinkled_candy.glb',             qty: 1 },
+  { path: '/models/ornaments/candy_shop/sprinkled_candy2.glb',            qty: 1 },
+  { path: '/models/ornaments/candy_shop/Sprinkled_donut1.glb',            qty: 2 },
+  { path: '/models/ornaments/candy_shop/Sprinkled_donut2.glb',            qty: 2 },
+  { path: '/models/ornaments/candy_shop/Sprinkled_donut3.glb',            qty: 2 },
+];
+
+// 디스코나잇 50pcs — 15 GLBs summing to 50 pieces. WebP-compressed (~51 MB on disk).
+// Silver_Star_top.glb auto-anchors to `top_point` via Scene.tsx ANCHORED_PLACEMENTS regex.
+const ORNAMENT_SET_3: OrnamentSet = [
+  { path: '/models/ornaments/disco/Beaded_Silver_Orb.glb',      qty: 5 },
+  { path: '/models/ornaments/disco/Crystal_Fairy.glb',          qty: 2 },
+  { path: '/models/ornaments/disco/Crystal_Reindeer.glb',       qty: 2 },
+  { path: '/models/ornaments/disco/Disco_Ball_L.glb',           qty: 4 },
+  { path: '/models/ornaments/disco/Disco_Ball_s.glb',           qty: 6 },
+  { path: '/models/ornaments/disco/Geometric_Silver_Star.glb',  qty: 1 },
+  { path: '/models/ornaments/disco/Gingerbread_Santa.glb',      qty: 4 },
+  { path: '/models/ornaments/disco/Glittering_White_Orb_L.glb', qty: 4 },
+  { path: '/models/ornaments/disco/Glittering_White_Orb_s.glb', qty: 6 },
+  { path: '/models/ornaments/disco/Iridescent_Ribbon_Bow.glb',  qty: 6 },
+  { path: '/models/ornaments/disco/MerryChistmas_Sign.glb',     qty: 1 }, // (typo in source filename preserved)
+  { path: '/models/ornaments/disco/Silver_Bell.glb',            qty: 2 },
+  { path: '/models/ornaments/disco/Silver_Christmas_Tree.glb',  qty: 1 },
+  { path: '/models/ornaments/disco/Silver_Star_top.glb',        qty: 1 },
+  { path: '/models/ornaments/disco/Tangled_Silver_Orb.glb',     qty: 5 },
+];
+
+// 도트볼 18pcs — 6 GLBs × 3 each = 18 pieces. WebP-compressed (~7 MB on disk).
+const ORNAMENT_SET_5: OrnamentSet = [
+  { path: '/models/ornaments/dotted_balls/Blue_Ho_Ho_Ho.glb',    qty: 3 },
+  { path: '/models/ornaments/dotted_balls/Green_Dotted_orb.glb', qty: 3 },
+  { path: '/models/ornaments/dotted_balls/Mint_Glitter_orb.glb', qty: 3 },
+  { path: '/models/ornaments/dotted_balls/Pink_Dotted_orb.glb',  qty: 3 },
+  { path: '/models/ornaments/dotted_balls/Pink_Ho_Ho_Ho.glb',    qty: 3 },
+  { path: '/models/ornaments/dotted_balls/Pink_starry_orb.glb',  qty: 3 },
+];
+
+// 발레프리즘 50pcs — 13 GLBs summing to 50 pieces. WebP-compressed (~18 MB on disk).
+const ORNAMENT_SET_7: OrnamentSet = [
+  { path: '/models/ornaments/ballet/Cherub_with_Guitar.glb',       qty: 2 },
+  { path: '/models/ornaments/ballet/Crystal_Alicorn.glb',          qty: 2 },
+  { path: '/models/ornaments/ballet/Crystal_Ballerina.glb',        qty: 2 },
+  { path: '/models/ornaments/ballet/Iridescent_Carriage.glb',      qty: 1 },
+  { path: '/models/ornaments/ballet/Iridescent_Diamond_Orb_L.glb', qty: 4 },
+  { path: '/models/ornaments/ballet/Iridescent_Diamond_Orb_S.glb', qty: 4 },
+  { path: '/models/ornaments/ballet/Iridescent_Orb_L.glb',         qty: 5 },
+  { path: '/models/ornaments/ballet/Iridescent_Orb_M.glb',         qty: 5 },
+  { path: '/models/ornaments/ballet/Iridescent_Orb_S.glb',         qty: 6 },
+  { path: '/models/ornaments/ballet/Iridescent_Reindeer.glb',      qty: 2 },
+  { path: '/models/ornaments/ballet/Iridescent_Ribbon_Bow.glb',    qty: 6 },
+  { path: '/models/ornaments/ballet/Iridescent_Snowflake.glb',     qty: 5 },
+  { path: '/models/ornaments/ballet/Iridescent_Ward.glb',          qty: 6 },
+];
+
+// 핑크루체 50pcs — 19 GLBs summing to 60 pieces (50 named + 10 bead accent). WebP-compressed (~26 MB on disk).
+const ORNAMENT_SET_8: OrnamentSet = [
+  { path: '/models/ornaments/pink/bead.glb',                 qty: 10 },
+  { path: '/models/ornaments/pink/carousel.glb',             qty: 1 },
+  { path: '/models/ornaments/pink/Cherub_with_Guitar.glb',   qty: 2 },
+  { path: '/models/ornaments/pink/dress.glb',                qty: 1 },
+  { path: '/models/ornaments/pink/flakeStar.glb',            qty: 2 },
+  { path: '/models/ornaments/pink/floral.glb',               qty: 2 },
+  { path: '/models/ornaments/pink/Iridescent_Ball_L.glb',    qty: 4 },
+  { path: '/models/ornaments/pink/Iridescent_Ball_M.glb',    qty: 4 },
+  { path: '/models/ornaments/pink/Iridescent_Ball_S.glb',    qty: 6 },
+  { path: '/models/ornaments/pink/Iridescent_Spiral.glb',    qty: 6 },
+  { path: '/models/ornaments/pink/key.glb',                  qty: 2 },
+  { path: '/models/ornaments/pink/shell.glb',                qty: 2 },
+  { path: '/models/ornaments/pink/snowFlake.glb',            qty: 2 },
+  { path: '/models/ornaments/pink/sphere.glb',               qty: 2 },
+  { path: '/models/ornaments/pink/train.glb',                qty: 1 },
+  { path: '/models/ornaments/pink/unicorn.glb',              qty: 2 },
+  { path: '/models/ornaments/pink/white_glitter_ball_L.glb', qty: 4 },
+  { path: '/models/ornaments/pink/white_glitter_ball_S.glb', qty: 6 },
+  { path: '/models/ornaments/pink/wing.glb',                 qty: 1 },
+];
+
+// 코크베어 70pcs — 20 GLBs summing to exactly 70 pieces. WebP-compressed (~22 MB on disk).
+const ORNAMENT_SET_11: OrnamentSet = [
+  { path: '/models/ornaments/coke_bear/Emerald_Bell.glb',           qty: 2 },
+  { path: '/models/ornaments/coke_bear/Emerald_Glitter.glb',        qty: 2 },
+  { path: '/models/ornaments/coke_bear/Emerald_Glitter_Holly.glb',  qty: 5 },
+  { path: '/models/ornaments/coke_bear/Emerald_Lattice.glb',        qty: 3 },
+  { path: '/models/ornaments/coke_bear/Emerald_Tile_Orb.glb',       qty: 5 },
+  { path: '/models/ornaments/coke_bear/Glittering_Red.glb',         qty: 2 },
+  { path: '/models/ornaments/coke_bear/Golden_Orb.glb',             qty: 5 },
+  { path: '/models/ornaments/coke_bear/Golden_Orb_mat.glb',         qty: 5 },
+  { path: '/models/ornaments/coke_bear/Golden_Ribbed_Orb.glb',      qty: 3 },
+  { path: '/models/ornaments/coke_bear/Golden_Star-top.glb',        qty: 1 },
+  { path: '/models/ornaments/coke_bear/Nutcracker_Soldier1.glb',    qty: 2 },
+  { path: '/models/ornaments/coke_bear/Nutcracker_Soldier2.glb',    qty: 2 },
+  { path: '/models/ornaments/coke_bear/Polar_Bear.glb',             qty: 3 },
+  { path: '/models/ornaments/coke_bear/red_Glitter_Holly.glb',      qty: 5 },
+  { path: '/models/ornaments/coke_bear/Red_Ornament_with_Gold.glb', qty: 3 },
+  { path: '/models/ornaments/coke_bear/Red_Ribbed_Orb.glb',         qty: 5 },
+  { path: '/models/ornaments/coke_bear/Red_Ribbon_Bow.glb',         qty: 8 },
+  { path: '/models/ornaments/coke_bear/Red_Star.glb',               qty: 5 },
+  { path: '/models/ornaments/coke_bear/Ruby_Bell.glb',              qty: 2 },
+  { path: '/models/ornaments/coke_bear/Santa_on_a_Red_Sleigh.glb',  qty: 2 },
+];
+
+// 리치엘빈 70pcs — 20 GLBs summing to exactly 70 pieces. WebP-compressed (~23 MB on disk).
 const ORNAMENT_SET_10: OrnamentSet = [
   { path: '/models/ornaments/rich_alvin/Alvin.glb',                  qty: 3 },
   { path: '/models/ornaments/rich_alvin/Champagne_Bottle.glb',       qty: 4 },
@@ -67,7 +203,14 @@ const ORNAMENT_SET_10: OrnamentSet = [
 // (they still commit to the cart normally — the cart is source of truth for purchase intent).
 const ORNAMENT_SETS: Record<number, OrnamentSet> = {
   1: ORNAMENT_SET_1,
+  2: ORNAMENT_SET_2,
+  3: ORNAMENT_SET_3,
+  4: ORNAMENT_SET_4,
+  5: ORNAMENT_SET_5,
+  7: ORNAMENT_SET_7,
+  8: ORNAMENT_SET_8,
   10: ORNAMENT_SET_10,
+  11: ORNAMENT_SET_11,
 };
 
 // Back-compat alias — some downstream code still references ORNAMENT_CONFIG.

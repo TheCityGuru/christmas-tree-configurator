@@ -141,6 +141,20 @@ function disposeGroup(group: THREE.Object3D) {
   });
 }
 
+// ---- Anchored (designated) ornament placements ----
+// Some ornaments (currently star-tops) get placed at a specific named object in the tree
+// rather than at a random `spot` beacon. Pattern is checked against the ornament GLB path;
+// if it matches AND the tree contains a node with the matching name, one instance is
+// anchored there. Any additional qty for that ornament falls through to normal random-fill
+// placement. When the tree lacks the anchor node, the whole qty falls through to random.
+const ANCHORED_PLACEMENTS: Array<{ pattern: RegExp; anchorNodeName: string }> = [
+  { pattern: /star[-_]top\.glb$/i, anchorNodeName: 'top_point' },
+];
+function findAnchorForPath(ornPath: string): string | null {
+  const entry = ANCHORED_PLACEMENTS.find(a => a.pattern.test(ornPath));
+  return entry?.anchorNodeName ?? null;
+}
+
 // Shared loader instance (reused across loads, has built-in cache)
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
@@ -486,7 +500,7 @@ export default function Scene({
     bloomComposer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(container.clientWidth, container.clientHeight),
-      0.8,  // strength
+      0.5,  // strength
       1.0,   // radius
       0.0,   // threshold
     );
@@ -563,8 +577,8 @@ export default function Scene({
 
     // ---- Directional Light ----
     {
-      const dirLight = new THREE.DirectionalLight(new THREE.Color('#ffffff'), 6.5);
-      dirLight.position.set(-0.9, 20, 3.2);
+      const dirLight = new THREE.DirectionalLight(new THREE.Color('#ffffff'), 3.77);
+      dirLight.position.set(-0.9, 20, -0.9);
       // Need intensity > 0 so MeshStandardMaterial floors (env.glb) get a real lit/unlit ratio.
       dirLight.castShadow = true;
       dirLight.shadow.mapSize.set(2048, 2048);
@@ -1551,6 +1565,31 @@ export default function Scene({
       const placements: PlaceTuple[] = [];
       const occupiedKeys = new Set<string>();
 
+      // Phase 0: anchored placements — e.g. star-tops go to the tree's `top_point` object.
+      // One instance per (anchor node, ornament). Any additional qty for that ornament falls
+      // through to Phase 1 preset / Phase 2 random-fill. If the tree lacks the anchor node,
+      // the whole qty falls through — nothing gets anchored.
+      const anchoredPlacedByPath = new Map<string, number>();
+      model.updateMatrixWorld(true);
+      const anchorModelInv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+      ornamentConfig.forEach((cfg) => {
+        const anchorName = findAnchorForPath(cfg.path);
+        if (!anchorName) return;
+        let anchorObj: THREE.Object3D | null = null;
+        model.traverse((child) => {
+          if (!anchorObj && child.name === anchorName) anchorObj = child;
+        });
+        if (!anchorObj) return;
+        const localPos = new THREE.Vector3();
+        (anchorObj as THREE.Object3D).getWorldPosition(localPos);
+        localPos.applyMatrix4(anchorModelInv);
+        // Lift the star 7cm above the anchor so it sits *on top of* the point,
+        // not centered at it (avoids the star's base clipping through the tip)
+        localPos.y += 0.07;
+        placements.push({ ornPath: cfg.path, pos: localPos, rotation: [0, 0, 0] });
+        anchoredPlacedByPath.set(cfg.path, 1);
+      });
+
       // Phase 1: preset
       if (preset?.placements) {
         const presetByPath = new Map<string, PlacementEntry[]>();
@@ -1562,7 +1601,9 @@ export default function Scene({
         ornamentConfig.forEach((cfg) => {
           const entries = presetByPath.get(cfg.path);
           if (!entries) return;
-          const presetCount = Math.min(entries.length, cfg.qty);
+          // Subtract anchored placements from qty so Phase 1 doesn't over-place
+          const effectiveQty = cfg.qty - (anchoredPlacedByPath.get(cfg.path) || 0);
+          const presetCount = Math.min(entries.length, effectiveQty);
           for (let i = 0; i < presetCount; i++) {
             const entry = entries[i];
             const pos = beaconLookup.get(entry.beaconKey);

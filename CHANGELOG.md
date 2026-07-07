@@ -6,6 +6,54 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-07 (evening) — 6 more ornament sets wired + anchored placement + GN instancing fix
+
+### Ornament sets added
+Registry now covers **9 of 11** catalog entries:
+- `ORNAMENT_SET_2` = 레인보우캔디샵 (28 GLBs, 73 pcs) — 606MB → 59MB
+- `ORNAMENT_SET_3` = 디스코나잇 (15 GLBs, 50 pcs) — 210MB → 51MB (one outlier Beaded_Silver_Orb at 735K tris kept at 36MB per user)
+- `ORNAMENT_SET_4` = 겨울숲 (7 GLBs, 20 pcs) — 127MB → 9.9MB
+- `ORNAMENT_SET_5` = 도트볼 (6 GLBs, 18 pcs) — 103MB → 7.1MB
+- `ORNAMENT_SET_7` = 발레프리즘 (13 GLBs, 50 pcs) — 220MB → 18MB
+- `ORNAMENT_SET_8` = 핑크루체 (19 GLBs, 60 pcs) — 299MB → 26MB
+- `ORNAMENT_SET_11` = 코크베어 (20 GLBs, 70 pcs) — 322MB → 22MB
+
+Remaining: id=6 (아이스젬), id=9 (스노우 크리스탈).
+
+### Anchored placement (star-tops on `top_point`)
+- New `ANCHORED_PLACEMENTS` array in Scene.tsx: pattern-matched ornament paths get anchored to specific tree nodes rather than random beacons.
+- Currently one entry: `/star[-_]top\.glb$/i` → `'top_point'` node. Matches `Golden_Star-top.glb` (coke_bear), `Silver_Star_top.glb` (disco), and any future star-tops in other sets.
+- Placement pipeline now 3-phase: Phase 0 (anchored) → Phase 1 (preset) → Phase 2 (random fill).
+- Star sits +7cm above the `top_point` object on Y so its base doesn't clip through the tree tip.
+- If tree lacks `top_point`, all star instances fall through to random beacons.
+- First star per tree lands anchored; additional qty (from multiple cart commits) goes to random beacons.
+
+### Blender Geometry Nodes → EXT_mesh_gpu_instancing bug + fix
+- 핑크루체's `bead.glb` used Blender GN to instance a sphere along a curve. Three.js loads EXT_mesh_gpu_instancing as an InstancedMesh, but our placement code reads only `.geometry` — dropping 20 per-curve positions.
+- Wrote `scripts/bake_gn_instances.mjs` (see `scripts/README.md`) that expands each instance into a real child node. One-shot per affected GLB.
+- Runtime fix (extend Scene.tsx to handle InstancedMesh sources natively) deferred.
+
+### Material whitelist rule change
+- Scene.tsx force-swap-to-silver whitelist extended: any path containing `/ornaments/` (subdirectory-based per-ornament sets) now keeps its authored material. Was silvering rich_alvin ornaments among others.
+
+### Draco → WebP for asset compression
+- Initial Draco attempt on rich_alvin damaged material state (black spots, valid attribute inspection but broken KHR_materials_clearcoat/sheen). Reverted.
+- Switched to `gltf-transform webp` — touches only image encoding, valid binary GLB output, works in Three.js and Babylon.
+- Pattern applied to 7 ornament folders. Total compression: ~2 GB source → ~213 MB.
+
+### Render setting defaults
+- Bloom strength: 0.8 → **0.5**
+- DirectionalLight intensity: 6.5 → **3.77**
+- DirectionalLight position: (-0.9, 20, 3.2) → **(-0.9, 20, -0.9)**
+
+### Files touched
+- `src/app/App.tsx` — 7 new `ORNAMENT_SET_N` arrays + registry entries
+- `src/app/components/Scene.tsx` — `ANCHORED_PLACEMENTS` + Phase 0 placement + `/ornaments/` whitelist entries at 4 sites + render defaults
+- `scripts/bake_gn_instances.mjs` + `scripts/README.md` — one-off GN instancing baker
+- `public/models/ornaments/{candy_shop,coke_bear,disco,dotted_balls,pink,rich_alvin,winter_forrest}/` — WebP-compressed GLBs
+
+---
+
 ## 2026-07-07 — 리치엘빈 wiring + per-ornament GLB architecture + WebP compression
 
 ### Per-ornament GLB sets — architecture
