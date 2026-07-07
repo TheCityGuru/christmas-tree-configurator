@@ -6,6 +6,27 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-07 — 리치엘빈 wiring + per-ornament GLB architecture + WebP compression
+
+### Per-ornament GLB sets — architecture
+- Renamed `ORNAMENT_CONFIG` → `ORNAMENT_SET_1` (엔젤리나 default set).
+- Added `ORNAMENT_SET_10` — 20 GLBs summing to exactly 70 pieces per set (리치엘빈 70pcs).
+- New `ORNAMENT_SETS: Record<number, OrnamentSet>` — future ornaments register here; ids without a set entry silently contribute nothing to the scene.
+- `scaledOrnamentConfig` rewritten to iterate all ornament layers (cart commits + preview), resolve each layer's set, scale by qty, merge into flat combined path→qty list.
+- Multi-ornament in cart now stacks visually — Q3 answer honored.
+
+### Material-override whitelist fix
+- Scene.tsx had 4 sites that force-swap ornament materials to a silver PBR material unless the path matches specific whitelist entries. New rule at all 4 sites: any path containing `/ornaments/` (subdirectory-based per-ornament sets) keeps its authored material.
+- Fixes 리치엘빈 rendering with unwanted silver override.
+
+### Draco misadventure + WebP compression win
+- Initial attempt: Draco geometry compression on all 20 리치엘빈 GLBs. `gltf-transform draco` produced split glTF (JSON + external .bin + external PNG textures) with `.glb` extension — Three.js parsed it (permissive loader) but Babylon rejected with "Unexpected magic". Rendered visually corrupted materials (black spots on ornaments) despite vertex attribute inspection showing no data loss.
+- Reverted to originals (316 MB total).
+- **WebP texture compression via `gltf-transform webp`** — touches only image encoding, no material extension damage risk. Result: **316 MB → 23 MB (93% reduction)** across all 20 ornaments. Valid self-contained binary GLBs (magic bytes `glTF`), works in both Three.js and Babylon.
+- **Lesson pinned:** WebP-first for asset compression. Draco can silently damage material extension state (KHR_materials_clearcoat / sheen) even when CLI attribute inspection reports "identical pre/post."
+
+---
+
 ## 2026-06-27 (afternoon) — Variant coverage, twotone accent, tree 4 sketchTree mapping
 
 ### Variant-specific GLB skips treeColor tint

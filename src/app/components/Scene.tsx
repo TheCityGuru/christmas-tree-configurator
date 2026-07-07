@@ -1653,7 +1653,8 @@ export default function Scene({
       placementsByPath.forEach((pathPlacements, ornPath) => {
         const srcModel = modelByPath.get(ornPath);
         if (!srcModel) return;
-        const keepOriginalMaterial = ornPath.includes('ribon_custom_material')
+        const keepOriginalMaterial = ornPath.includes('/ornaments/')
+          || ornPath.includes('ribon_custom_material')
           || ornPath.includes('Silver_Ornament_Ball_');
         const strOffset = stringOffsetByPath.get(ornPath) || new THREE.Vector3();
         const count = pathPlacements.length;
@@ -1818,7 +1819,8 @@ export default function Scene({
       const srcModel = ornamentCacheRef.current.get(record.ornamentPath);
       if (!srcModel || !model) return null;
 
-      const keepOriginal = record.ornamentPath.includes('ribon_custom_material')
+      const keepOriginal = record.ornamentPath.includes('/ornaments/')
+        || record.ornamentPath.includes('ribon_custom_material')
         || record.ornamentPath.includes('Silver_Ornament_Ball_');
 
       const clone = srcModel.clone(true);
@@ -2089,7 +2091,8 @@ export default function Scene({
     const createThumbClone = (ornPath: string): THREE.Group | null => {
       const srcModel = ornamentCacheRef.current.get(ornPath);
       if (!srcModel) return null;
-      const keepOriginal = ornPath.includes('ribon_custom_material')
+      const keepOriginal = ornPath.includes('/ornaments/')
+        || ornPath.includes('ribon_custom_material')
         || ornPath.includes('Silver_Ornament_Ball_');
       const clone = srcModel.clone(true);
       clone.traverse((child) => {
@@ -2269,7 +2272,8 @@ export default function Scene({
         // Create temp highlight clone as picked ornament
         const srcModel = ornamentCacheRef.current.get(record.ornamentPath);
         if (!srcModel || !model) return;
-        const keepOriginal = record.ornamentPath.includes('ribon_custom_material')
+        const keepOriginal = record.ornamentPath.includes('/ornaments/')
+          || record.ornamentPath.includes('ribon_custom_material')
           || record.ornamentPath.includes('Silver_Ornament_Ball_');
         const clone = srcModel.clone(true);
         clone.traverse((child) => {

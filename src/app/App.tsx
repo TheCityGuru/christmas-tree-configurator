@@ -11,7 +11,14 @@ import type { SceneActions, StoredOrnamentInfo, PlacementPreset } from '@/app/co
 // Module-level constant so the array reference stays stable across re-renders
 // (prevents ornament placement effect from re-firing on every App state change).
 // Each entry: { path, qty } — qty controls exact number placed on the tree.
-const ORNAMENT_CONFIG: { path: string; qty: number }[] = [
+// ---- Per-ornament GLB sets ----
+// Keyed by ornament catalog id (matches ornamentNames record).
+// Each set is a list of {path, qty} — Scene loads and places each GLB at qty positions.
+// New ornaments: just add a new SET_N array + register it in ORNAMENT_SETS.
+type OrnamentSet = { path: string; qty: number }[];
+
+// 엔젤리나 50pcs — the original default/placeholder set (17 GLBs, total ~50 pieces).
+const ORNAMENT_SET_1: OrnamentSet = [
   { path: '/models/Snowflake_Radiance.glb', qty: 2 },
   { path: '/models/Gingko_Charm.glb', qty: 2 },
   { path: '/models/Ornate_Chalice.glb', qty: 2 },
@@ -22,7 +29,6 @@ const ORNAMENT_CONFIG: { path: string; qty: number }[] = [
   { path: '/models/Silver_Ornament_Ball_mat.glb', qty: 6 },
   { path: '/models/ribon_custom_material.glb', qty: 10 },
   { path: '/models/Frosted_Leaf_Charm.glb', qty: 2 },
-  // Silver_Branch removed
   { path: '/models/Silver_Ribbon.glb', qty: 2 },
   { path: '/models/Bronchial_Tree.glb', qty: 2 },
   { path: '/models/Icicle_ornament.glb', qty: 2 },
@@ -31,6 +37,41 @@ const ORNAMENT_CONFIG: { path: string; qty: number }[] = [
   { path: '/models/Spiral_Faceted_Pendan.glb', qty: 2 },
   { path: '/models/Silver_Filigree_Duck.glb', qty: 2 },
 ];
+
+// 리치엘빈 70pcs — 20 GLBs summing to exactly 70 pieces. Draco-compressed with shared textures
+// (~20 MB total on disk vs 316 MB before compression).
+const ORNAMENT_SET_10: OrnamentSet = [
+  { path: '/models/ornaments/rich_alvin/Alvin.glb',                  qty: 3 },
+  { path: '/models/ornaments/rich_alvin/Champagne_Bottle.glb',       qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Cream_and_Gold_Glitter.glb', qty: 3 },
+  { path: '/models/ornaments/rich_alvin/Dotted_Orb.glb',             qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Gold_Champagne_Bottle.glb',  qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Gold_Orb.glb',               qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Gold_Ribbed_Orb.glb',        qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Gold_Ribbon.glb',            qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Gold_Star.glb',              qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Golden_Glitter.glb',         qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Golden_Star_Orb.glb',        qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Mat_Orb.glb',                qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Merry_Christmas.glb',        qty: 1 },
+  { path: '/models/ornaments/rich_alvin/Red_Ribbon.glb',             qty: 7 },
+  { path: '/models/ornaments/rich_alvin/Ribbon_Tree.glb',            qty: 1 },
+  { path: '/models/ornaments/rich_alvin/Silver_Package.glb',         qty: 3 },
+  { path: '/models/ornaments/rich_alvin/Snowman.glb',                qty: 2 },
+  { path: '/models/ornaments/rich_alvin/Starry_White_Orb.glb',       qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Sunburst_Gold_Orb.glb',      qty: 4 },
+  { path: '/models/ornaments/rich_alvin/Winged_Angel.glb',           qty: 2 },
+];
+
+// Catalog id → set. Ornament ids without a set entry contribute nothing to the scene
+// (they still commit to the cart normally — the cart is source of truth for purchase intent).
+const ORNAMENT_SETS: Record<number, OrnamentSet> = {
+  1: ORNAMENT_SET_1,
+  10: ORNAMENT_SET_10,
+};
+
+// Back-compat alias — some downstream code still references ORNAMENT_CONFIG.
+const ORNAMENT_CONFIG = ORNAMENT_SET_1;
 
 // ============================================================================
 // LIGHT RECOMMENDATION TABLES
@@ -755,18 +796,30 @@ export default function App() {
     return cartItems.some(it => it.kind === 'ornament' && it.ornamentId === 1);
   }, [cartItems, selectedOrnament]);
 
-  // Ornament render config — currently only ornament#1 has GLB wiring (ORNAMENT_CONFIG).
-  // Other ornament catalog entries are placeholder UI; their cart commits persist in state
-  // but contribute nothing to the scene until per-ornament GLB sets are wired in a follow-up.
-  // For now: sum qty across all ornament#1 layers (committed + preview), scale ORNAMENT_CONFIG.
+  // Ornament render config — iterates every ornament layer (cart commits + panel preview),
+  // resolves each layer's ORNAMENT_SET, scales by layer qty, and merges into a flat combined
+  // list keyed by GLB path.
+  //
+  // Layers without a registered set in ORNAMENT_SETS silently contribute nothing to the scene
+  // (they still commit to the cart — the cart is source of truth for purchase intent).
+  // As more ornaments (2–9, 11) get real GLB wiring, add to ORNAMENT_SETS at module scope.
+  //
+  // Note: Scene's placement useEffect still handles the beacon-fill + random-fill + truncate
+  // pipeline. Overflow-to-storage (Q15) is the follow-up in the ornament placement rewrite.
   const scaledOrnamentConfig = useMemo(() => {
-    let totalQty = 0;
+    const combined = new Map<string, number>();
+    const addLayer = (ornamentId: number, layerQty: number) => {
+      const set = ORNAMENT_SETS[ornamentId];
+      if (!set || layerQty <= 0) return;
+      for (const entry of set) {
+        combined.set(entry.path, (combined.get(entry.path) || 0) + entry.qty * layerQty);
+      }
+    };
     cartItems.forEach(it => {
-      if (it.kind === 'ornament' && it.ornamentId === 1) totalQty += it.qty;
+      if (it.kind === 'ornament') addLayer(it.ornamentId, it.qty);
     });
-    if (selectedOrnament === 1) totalQty += ornamentQty;
-    if (totalQty < 1) return [];
-    return ORNAMENT_CONFIG.map(c => ({ path: c.path, qty: c.qty * totalQty }));
+    if (selectedOrnament > 0) addLayer(selectedOrnament, ornamentQty);
+    return Array.from(combined.entries()).map(([path, qty]) => ({ path, qty }));
   }, [cartItems, selectedOrnament, ornamentQty]);
 
   const pageTitles = [
