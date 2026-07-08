@@ -6,6 +6,15 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-07 (late) — Final 2 ornament sets wired — 11 of 11 complete
+
+- `ORNAMENT_SET_6` = 아이스젬 (6 GLBs × 3 = 18 pcs). 51MB → 4.9MB (90%).
+- `ORNAMENT_SET_9` = 스노우크리스탈 (16 GLBs, 50 pcs). 159MB → 14MB (91%).
+- Registry `ORNAMENT_SETS` now covers all 11 catalog ids: `{ 1: 엔젤리나, 2: 레인보우캔디샵, 3: 디스코나잇, 4: 겨울숲, 5: 도트볼, 6: 아이스젬, 7: 발레프리즘, 8: 핑크루체, 9: 스노우크리스탈, 10: 리치엘빈, 11: 코크베어 }`.
+- Day total: ~2.8 GB source → ~227 MB deployed across 8 ornament folders (~92% reduction).
+
+---
+
 ## 2026-07-07 (evening) — 6 more ornament sets wired + anchored placement + GN instancing fix
 
 ### Ornament sets added

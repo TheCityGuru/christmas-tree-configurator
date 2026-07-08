@@ -111,6 +111,16 @@ const ORNAMENT_SET_5: OrnamentSet = [
   { path: '/models/ornaments/dotted_balls/Pink_starry_orb.glb',  qty: 3 },
 ];
 
+// 아이스젬 18pcs — 6 GLBs × 3 each = 18 pieces. WebP-compressed (~5 MB on disk).
+const ORNAMENT_SET_6: OrnamentSet = [
+  { path: '/models/ornaments/ice/Bead_Tassel.glb',        qty: 3 },
+  { path: '/models/ornaments/ice/Crystal_Pendant.glb',    qty: 3 },
+  { path: '/models/ornaments/ice/Crystal_prism.glb',      qty: 3 },
+  { path: '/models/ornaments/ice/Crystal_Teardrop.glb',   qty: 3 },
+  { path: '/models/ornaments/ice/Faceted_Crystal.glb',    qty: 3 },
+  { path: '/models/ornaments/ice/Silver_Mirror_Ball.glb', qty: 3 },
+];
+
 // 발레프리즘 50pcs — 13 GLBs summing to 50 pieces. WebP-compressed (~18 MB on disk).
 const ORNAMENT_SET_7: OrnamentSet = [
   { path: '/models/ornaments/ballet/Cherub_with_Guitar.glb',       qty: 2 },
@@ -175,6 +185,26 @@ const ORNAMENT_SET_11: OrnamentSet = [
   { path: '/models/ornaments/coke_bear/Santa_on_a_Red_Sleigh.glb',  qty: 2 },
 ];
 
+// 스노우크리스탈 50pcs — 16 GLBs summing to 50 pieces. WebP-compressed (~14 MB on disk).
+const ORNAMENT_SET_9: OrnamentSet = [
+  { path: '/models/ornaments/snow/Bead_Tassel.glb',            qty: 2 },
+  { path: '/models/ornaments/snow/Crystal_Arrowhead.glb',      qty: 3 },
+  { path: '/models/ornaments/snow/Crystal_Deer.glb',           qty: 2 },
+  { path: '/models/ornaments/snow/Crystal_Pendant.glb',        qty: 3 },
+  { path: '/models/ornaments/snow/Crystal_prism.glb',          qty: 3 },
+  { path: '/models/ornaments/snow/Crystal_Snowflake.glb',      qty: 3 },
+  { path: '/models/ornaments/snow/Crystal_Snowflake_L.glb',    qty: 3 },
+  { path: '/models/ornaments/snow/Crystal_Snowflake_S.glb',    qty: 3 },
+  { path: '/models/ornaments/snow/Crystal_Teardrop.glb',       qty: 3 },
+  { path: '/models/ornaments/snow/Faceted_Crystal.glb',        qty: 3 },
+  { path: '/models/ornaments/snow/Fluffy_Mitten.glb',          qty: 2 },
+  { path: '/models/ornaments/snow/Glittering_White_Orb_L.glb', qty: 4 },
+  { path: '/models/ornaments/snow/Glittering_White_Orb_s.glb', qty: 5 },
+  { path: '/models/ornaments/snow/Snowy_Pine.glb',             qty: 4 },
+  { path: '/models/ornaments/snow/Snowy_Reindeer.glb',         qty: 3 },
+  { path: '/models/ornaments/snow/Twisted_Glass_Ward.glb',     qty: 4 },
+];
+
 // 리치엘빈 70pcs — 20 GLBs summing to exactly 70 pieces. WebP-compressed (~23 MB on disk).
 const ORNAMENT_SET_10: OrnamentSet = [
   { path: '/models/ornaments/rich_alvin/Alvin.glb',                  qty: 3 },
@@ -207,8 +237,10 @@ const ORNAMENT_SETS: Record<number, OrnamentSet> = {
   3: ORNAMENT_SET_3,
   4: ORNAMENT_SET_4,
   5: ORNAMENT_SET_5,
+  6: ORNAMENT_SET_6,
   7: ORNAMENT_SET_7,
   8: ORNAMENT_SET_8,
+  9: ORNAMENT_SET_9,
   10: ORNAMENT_SET_10,
   11: ORNAMENT_SET_11,
 };
