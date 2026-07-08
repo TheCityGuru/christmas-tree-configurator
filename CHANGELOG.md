@@ -6,6 +6,16 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-07 (late²) — Angelina folder reorg
+
+- Moved all 17 엔젤리나 GLBs + `bead_string.glb` from flat `/models/*.glb` into `/models/ornaments/angelina/*.glb` to match the folder-per-set convention used by all other ornament sets.
+- Updated `ORNAMENT_SET_1` paths (17 entries) + `beadStringPath` prop in App.tsx.
+- Scene.tsx material-override whitelist tweaked at all 4 sites: `/ornaments/` still triggers "keep authored," EXCEPT when path also contains `/ornaments/angelina/` → angelina items continue to get the silver PBR override so the historical look is preserved.
+- `ribon_custom_material` + `Silver_Ornament_Ball_` substring rules still fire independently; those specific angelina items keep their authored materials as before.
+- No visual change expected.
+
+---
+
 ## 2026-07-07 (late) — Final 2 ornament sets wired — 11 of 11 complete
 
 - `ORNAMENT_SET_6` = 아이스젬 (6 GLBs × 3 = 18 pcs). 51MB → 4.9MB (90%).

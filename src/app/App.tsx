@@ -17,25 +17,28 @@ import type { SceneActions, StoredOrnamentInfo, PlacementPreset } from '@/app/co
 // New ornaments: just add a new SET_N array + register it in ORNAMENT_SETS.
 type OrnamentSet = { path: string; qty: number }[];
 
-// 엔젤리나 50pcs — the original default/placeholder set (17 GLBs, total ~50 pieces).
+// 엔젤리나 50pcs — the original default set (17 GLBs, total ~50 pieces).
+// Note: Scene.tsx's material-override whitelist explicitly EXCLUDES /ornaments/angelina/
+// from the "keep authored materials" rule, so this set continues to get the silver PBR
+// override at render time (matches the historical look, unaffected by the folder move).
 const ORNAMENT_SET_1: OrnamentSet = [
-  { path: '/models/Snowflake_Radiance.glb', qty: 2 },
-  { path: '/models/Gingko_Charm.glb', qty: 2 },
-  { path: '/models/Ornate_Chalice.glb', qty: 2 },
-  { path: '/models/Trumpeting_Angel_predraco.glb', qty: 2 },
-  { path: '/models/Spiral_star.glb', qty: 2 },
-  { path: '/models/Reindeer.glb', qty: 1 },
-  { path: '/models/Silver_Ornament_Ball_smooth.glb', qty: 6 },
-  { path: '/models/Silver_Ornament_Ball_mat.glb', qty: 6 },
-  { path: '/models/ribon_custom_material.glb', qty: 10 },
-  { path: '/models/Frosted_Leaf_Charm.glb', qty: 2 },
-  { path: '/models/Silver_Ribbon.glb', qty: 2 },
-  { path: '/models/Bronchial_Tree.glb', qty: 2 },
-  { path: '/models/Icicle_ornament.glb', qty: 2 },
-  { path: '/models/Silver_icicle_pendant.glb', qty: 2 },
-  { path: '/models/Beaded_Diamond_Pendan.glb', qty: 2 },
-  { path: '/models/Spiral_Faceted_Pendan.glb', qty: 2 },
-  { path: '/models/Silver_Filigree_Duck.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Snowflake_Radiance.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Gingko_Charm.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Ornate_Chalice.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Trumpeting_Angel_predraco.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Spiral_star.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Reindeer.glb', qty: 1 },
+  { path: '/models/ornaments/angelina/Silver_Ornament_Ball_smooth.glb', qty: 6 },
+  { path: '/models/ornaments/angelina/Silver_Ornament_Ball_mat.glb', qty: 6 },
+  { path: '/models/ornaments/angelina/ribon_custom_material.glb', qty: 10 },
+  { path: '/models/ornaments/angelina/Frosted_Leaf_Charm.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Silver_Ribbon.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Bronchial_Tree.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Icicle_ornament.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Silver_icicle_pendant.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Beaded_Diamond_Pendan.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Spiral_Faceted_Pendan.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/Silver_Filigree_Duck.glb', qty: 2 },
 ];
 
 // 겨울숲 20pcs — 7 GLBs summing to exactly 20 pieces. WebP-compressed (~10 MB total on disk).
@@ -1029,7 +1032,7 @@ export default function App() {
               ornamentConfig={scaledOrnamentConfig}
               rearrangeMode={rearrangeMode || adminPlacementMode}
               hdriPath="/models/hdri/brown_photostudio_02_1k.exr"
-              beadStringPath={beadStringActive ? '/models/bead_string.glb' : undefined}
+              beadStringPath={beadStringActive ? '/models/ornaments/angelina/bead_string.glb' : undefined}
               placementPresetPath="/settings/placements.json"
               actionsRef={sceneActionsRef}
               onStorageChange={handleStorageChange}
