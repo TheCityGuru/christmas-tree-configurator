@@ -6,6 +6,39 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-10 — 더퍼스트 트리 wired + JS-default-ate-opt-out fix + baked lights
+
+### 더퍼스트 트리 (theFirstTree_test.glb) wired for 180cm × 없음
+
+- New asset `public/models/trees/theFirstTree_test.glb` (8.4 MB) — first real 더퍼스트 GLB (Tree slot 2). Previously the slot fell back to `fishboneTree_green150.glb`.
+- `App.tsx` `treeVariantModels`: added `'2-180cm-none': '/models/trees/theFirstTree_test.glb'`. Other 더퍼스트 (size × color) combos still fall back to the tree default (open item: 210cm × 없음).
+- `Scene.tsx` — new 4-quadrant instancing block gated on `treeModelPath.includes('theFirstTree')`. Clones every `spot(.NNN)?`, `branch(.NNN)?`, and `foliage(.NNN)?` node at 90° / 180° / 270° around world Y. Uses the same `quaternion.premultiply(worldY-rot)` pattern as ultimate_tree_v2 / sketchTree so baked branch quaternions swing correctly. Regex handles both dot-preserved and dot-stripped GLTFLoader outputs.
+
+### Material recolor bug — Scene.tsx default parameter was eating App.tsx's `undefined` opt-out
+
+- **Symptom**: 더퍼스트 rendered as a uniform bright green (`#2d5a27`) despite the authored materials being dark olive (`#344a2f`, `#0b180b`, `#060e06`) — visually nothing like the Babylon sandbox reference.
+- **Root cause**: `Scene.tsx` prop destructuring declared `treeColor = '#2d5a27'` as a default parameter. App.tsx's variant-specific opt-out (`treeColor={undefined}` when a `treeVariantModels` entry exists) was silently substituted by that default — the recolor useEffect then repainted all 892 foliage-tagged materials to the fallback green.
+- **Fix**: removed the default parameter. `treeColor?: string` now propagates `undefined` faithfully, and the recolor effect's `if (!treeColor) return;` correctly early-returns for variant-specific GLBs. Authored materials render as-shipped.
+- **Diagnostic recipe** (kept in the mental toolkit): dump material state (a) right after `gltf.scene` returns, (b) right before `treeGroup.add(model)`, and (c) log every recolor fire with the received `treeColor` value + repaint count. When (a) and (b) match but (c) shows a repaint using a value the caller thought it had opted out of → the callee is defaulting the prop.
+- **Pattern lesson**: JS destructuring defaults substitute whenever the incoming value is `undefined` (not just missing). When a prop's `undefined` carries semantic meaning ("do nothing"), the callee MUST NOT declare a default for it.
+
+### 더퍼스트 전구 일체형 — 3050 built-in bulbs baked as default (180cm)
+
+- 더퍼스트 트리 remains 전구 일체형: Page 2 light thumbnails still surface the "electricity-integrated, no add-on" modal on click. Cart never gets add-on light rows for this tree.
+- **What changed**: instead of the light pipeline hard-returning `[]` for `selectedTree === 2`, App now injects a synthetic `deperse-builtin` layer sourced from a per-size table (`DEPERSE_BUILTIN_BULB_COUNT`) so the scatter effect renders the built-in bulbs. Only `'180cm': 3050` for now — other sizes still empty until authored counts land.
+- Palette: warm white `['#fff5cc']`, single color.
+- `Scene.tsx` — scatter gate extended to `isUltimate || isSketch || isTheFirstTree`. Cluster regex `/^(?:foliage|branch)(?:\.\d{3}|\d{3})?(?:_rot_\d+)?$/` matches both `foliage.NNN` and `branch.NNN` parent nodes plus the `_rot_N` clones from the instancing block. Descendant-walk mesh collection reused from sketch family. Bounds derivation falls into the cluster-bbox branch. TUNING entry seeded from sketchTree numbers as a starting baseline — tune once the visual settles.
+- The existing 전구 ON / 점멸모드 / 전구 OFF button controls the built-in bulbs like any other tree's lights.
+
+### Files
+- `src/app/App.tsx` — `treeVariantModels` entry, `DEPERSE_BUILTIN_BULB_COUNT` table, `lightLayers` synthetic layer injection
+- `src/app/components/Scene.tsx` — theFirstTree quadrant clone block, scatter gate + cluster regex + TUNING, `treeColor` default parameter removal
+- `public/models/trees/theFirstTree_test.glb` — new asset
+- `public/screen capture/스크린샷 2026-07-10 171717.png` — Babylon sandbox reference (authored dark-olive look)
+- `public/screen capture/더퍼스트_트리-171851.png` — pre-fix screenshot (before recolor bug was found)
+
+---
+
 ## 2026-07-07 (late²) — Angelina folder reorg
 
 - Moved all 17 엔젤리나 GLBs + `bead_string.glb` from flat `/models/*.glb` into `/models/ornaments/angelina/*.glb` to match the folder-per-set convention used by all other ornament sets.

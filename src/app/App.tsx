@@ -320,6 +320,12 @@ const SCENE_COUNT_TABLE: Record<TreeColorGroup, Record<string, Record<LightFamil
   'deperse': null, // 더퍼스트 — empty in source, returns 0 for all lookups
 };
 
+// 더퍼스트 트리 is 전구 일체형 — lights are baked defaults, not user-purchasable.
+// Extend the map when 210cm authored counts land.
+const DEPERSE_BUILTIN_BULB_COUNT: Record<string, number> = {
+  '180cm': 3050,
+};
+
 /** Returns the recommended scene-render bulb count from #트리. Returns 0 when no data. */
 function getSceneBulbCount(treeId: number, size: string, lightId: number, wrap: WrapKey): number {
   const group = TREE_COLOR_GROUP[treeId];
@@ -838,6 +844,7 @@ export default function App() {
     '1-180cm-mix':   '/models/trees/fishboneTree_twotone180.glb',
     '1-210cm-olive': '/models/trees/fishboneTree_green210.glb',
     '1-210cm-mix':   '/models/trees/fishboneTree_twotone210.glb',
+    '2-180cm-none':  '/models/trees/theFirstTree_test.glb',
     '3-120cm-olive': '/models/trees/sketchTree_olive120.glb',
     '3-120cm-snow':  '/models/trees/sketchTree_white120.glb',
     '3-150cm-olive': '/models/trees/sketchTree_olive150.glb',
@@ -937,10 +944,19 @@ export default function App() {
   // (Q4 = re-apply). Cart purchase numbers stay frozen at commit time.
   type LightLayer = { layerId: string; lightId: number; bulbCount: number; palette: string[] };
   const lightLayers = useMemo<LightLayer[]>(() => {
-    // 더퍼스트 — 전구 일체형 (built-in baked lights). Hard gate: no add-on lights render
-    // regardless of cart contents. When the real 더퍼스트 model lands, its lights will
-    // already be part of the GLB.
-    if (selectedTree === 2) return [];
+    // 더퍼스트 — 전구 일체형 (built-in baked lights). Cart never gets add-on light rows for
+    // this tree (Page 2 modal blocks purchase). Instead, we inject a synthetic layer with
+    // the size-specific baked count so the scatter effect renders the built-in lights.
+    if (selectedTree === 2) {
+      const builtIn = DEPERSE_BUILTIN_BULB_COUNT[selectedSize];
+      if (!builtIn) return [];
+      return [{
+        layerId: 'deperse-builtin',
+        lightId: 0, // sentinel — not a purchasable light id
+        bulbCount: builtIn,
+        palette: ['#fff5cc'],
+      }];
+    }
     const layers: LightLayer[] = [];
     cartItems.forEach(item => {
       if (item.kind !== 'light') return;

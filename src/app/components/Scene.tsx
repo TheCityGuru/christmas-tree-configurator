@@ -380,7 +380,10 @@ function seededShuffle<T>(arr: T[], seed: number = 42): T[] {
 // ---------- Component ----------
 export default function Scene({
   treeModelPath,
-  treeColor = '#2d5a27',
+  // No default: App.tsx intentionally passes `undefined` to opt out of foliage recolor
+  // for variant-specific GLBs (e.g. theFirstTree, twotone) whose authored materials
+  // should render as-shipped. A default here silently overrode that opt-out.
+  treeColor,
 
   lightMode = 'on',
   ornamentConfig = [],
@@ -1013,6 +1016,40 @@ export default function Scene({
           clones.forEach((c) => model.add(c));
         }
 
+        // For theFirstTree: 4-quadrant tree (same pattern as ultimate_tree_v2 / sketchTree).
+        // Clone every `spot.NNN`, `branch.NNN`, and `foliage.NNN` node at 90°, 180°, 270°
+        // around world Y. GLTFLoader may strip dots (`spot001`) or preserve them (`spot.001`),
+        // so regex handles both.
+        if (treeModelPath.includes('theFirstTree')) {
+          const rotations = [Math.PI / 2, Math.PI, Math.PI * 3 / 2];
+          const nodeRe = /^(spot|branch|foliage)(\.\d{3}|\d{3})?$/;
+          const yAxis = new THREE.Vector3(0, 1, 0);
+          const clones: THREE.Object3D[] = [];
+
+          const sourceNodes: THREE.Object3D[] = [];
+          model.traverse((child) => {
+            if (nodeRe.test(child.name)) sourceNodes.push(child);
+          });
+          sourceNodes.forEach((node) => {
+            rotations.forEach((angle, idx) => {
+              const clone = node.clone(true);
+              clone.name = `${node.name}_rot_${idx}`;
+              const qy = new THREE.Quaternion().setFromAxisAngle(yAxis, angle);
+              clone.quaternion.premultiply(qy);
+              const pos = clone.position.clone();
+              const cos = Math.cos(angle);
+              const sin = Math.sin(angle);
+              clone.position.set(
+                pos.x * cos + pos.z * sin,
+                pos.y,
+                -pos.x * sin + pos.z * cos,
+              );
+              clones.push(clone);
+            });
+          });
+          clones.forEach((c) => model.add(c));
+        }
+
         // Light scatter runs in its own effect (see "Emissive lights" useEffect below)
         // so changes to selectedLight / lightCount don't require a full tree reload.
 
@@ -1136,7 +1173,11 @@ export default function Scene({
     // fishboneTree_*.glb family (same 4-quadrant Blender source, renamed per new convention).
     const isUltimate = (treeModelPath?.includes('ultimate_tree_v2') || treeModelPath?.includes('fishboneTree')) ?? false;
     const isSketch = treeModelPath?.includes('sketchTree') ?? false;
-    if (!treeModelPath || (!isUltimate && !isSketch)) return;
+    // 더퍼스트 — 전구 일체형. Built-in baked-light layer is injected by App.tsx's lightLayers
+    // useMemo when the size has an authored count. Scatter uses the same sketch-family bounds
+    // strategy since `foliage.NNN` nodes carry the visible needle meshes.
+    const isTheFirstTree = treeModelPath?.includes('theFirstTree') ?? false;
+    if (!treeModelPath || (!isUltimate && !isSketch && !isTheFirstTree)) return;
     const renderableLayers = lightLayers.filter((l) => l.bulbCount > 0);
     if (renderableLayers.length === 0) return;
     // Aggregate count drives the global oversample/safety budget (clusters/PER_BRANCH math).
@@ -1151,14 +1192,21 @@ export default function Scene({
     //   - sketch: scatter on any `sketchBranch*` (parent may be a Group → walk into descendants)
     const clusterRe = isUltimate
       ? /^(?:branch(?:\d{3})?3|Cube022(?:_\d+)?)$/
-      : /^sketchBranch/;
+      : isTheFirstTree
+        // theFirstTree: `foliage` AND `branch` parent nodes both host bulbs. Same descendant-walk
+        // pattern as sketchTree (parent may be a Group). Optional `.NNN` / `NNN` suffix covers
+        // Blender exports either way; optional `_rot_N` suffix covers clones added by the
+        // quadrant instancing block above.
+        ? /^(?:foliage|branch)(?:\.\d{3}|\d{3})?(?:_rot_\d+)?$/
+        : /^sketchBranch/;
     model.updateMatrixWorld(true);
     const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
 
     // First pass: collect all matching needle clusters so we can size PER_BRANCH dynamically.
     const clusters: THREE.Mesh[] = [];
-    if (isSketch) {
-      // sketchTree: parent may be a Group; walk into matched parents + collect descendant meshes.
+    if (isSketch || isTheFirstTree) {
+      // sketchTree / theFirstTree: parent may be a Group; walk into matched parents + collect
+      // descendant meshes so we scatter over the actual foliage geometry, not the parent node.
       const matchedParents: THREE.Object3D[] = [];
       model.traverse((child) => {
         if (clusterRe.test(child.name)) matchedParents.push(child);
@@ -1205,7 +1253,12 @@ export default function Scene({
       // sit further outward per user feedback. Per-sample rMaxKeep loosened to 1.75 to
       // ensure even the widest vertex picks remain inside the silhouette after push.
       ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.45, tipRPct: 0.32, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.75 }
-      : { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95 };
+      : isTheFirstTree
+        // theFirstTree: clusters (`foliage` descendants) ARE the visible needle meshes → cluster
+        // bbox drives shape. Start from sketchTree numbers as a reasonable baseline; retune once
+        // rendered.
+        ? { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95 }
+        : { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95 };
 
     const bbox = new THREE.Box3();
     const tmpBox = new THREE.Box3();
