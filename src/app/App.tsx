@@ -321,9 +321,11 @@ const SCENE_COUNT_TABLE: Record<TreeColorGroup, Record<string, Record<LightFamil
 };
 
 // 더퍼스트 트리 is 전구 일체형 — lights are baked defaults, not user-purchasable.
-// Extend the map when 210cm authored counts land.
+// 210cm count is a placeholder (using the 180cm figure) until the authored count lands —
+// replace when confirmed.
 const DEPERSE_BUILTIN_BULB_COUNT: Record<string, number> = {
   '180cm': 3050,
+  '210cm': 3050, // TODO: confirm 210cm bulb count with client
 };
 
 /** Returns the recommended scene-render bulb count from #트리. Returns 0 when no data. */
@@ -845,6 +847,7 @@ export default function App() {
     '1-210cm-olive': '/models/trees/fishboneTree_green210.glb',
     '1-210cm-mix':   '/models/trees/fishboneTree_twotone210.glb',
     '2-180cm-none':  '/models/trees/theFirstTree_test.glb',
+    '2-210cm-none':  '/models/trees/theFirstTree_test_v2.glb',
     '3-120cm-olive': '/models/trees/sketchTree_olive120.glb',
     '3-120cm-snow':  '/models/trees/sketchTree_white120.glb',
     '3-150cm-olive': '/models/trees/sketchTree_olive150.glb',

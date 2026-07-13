@@ -1247,18 +1247,22 @@ export default function Scene({
       yMinKeepPct: number;// per-sample reject below this
       yMaxKeepPct: number;// per-sample reject above this
       rMaxKeepPct: number;// per-sample reject if vertex curR > this × maxR
+      depthMin: number;   // randF ∈ [depthMin, 1.0]; higher = shells lights near outer envelope,
+                          // lower = fills the volume. 1.0 → all on outer shell (hollow cone).
     };
     const TUNING: ScatterTuning = isUltimate
       // baseR 1.45 × maxR pushes lights to the visible foliage edge. Was 1.30; bumped to
       // sit further outward per user feedback. Per-sample rMaxKeep loosened to 1.75 to
       // ensure even the widest vertex picks remain inside the silhouette after push.
-      ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.45, tipRPct: 0.32, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.75 }
+      ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.45, tipRPct: 0.32, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.75, depthMin: 0.35 }
       : isTheFirstTree
-        // theFirstTree: clusters (`foliage` descendants) ARE the visible needle meshes → cluster
-        // bbox drives shape. Start from sketchTree numbers as a reasonable baseline; retune once
-        // rendered.
-        ? { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95 }
-        : { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95 };
+        // theFirstTree: `branch`/`foliage` clusters both host bulbs. Wider y-band (0.05→1.00)
+        // so the cone reaches both the tip and the bottom skirt of the visible foliage.
+        // tipRPct 0.15 keeps some spread at the crown instead of collapsing to a knife-point.
+        // depthMin 0.65 → randF ∈ [0.65, 1.0] → bulbs pin to the outer 35% of the target
+        // radius (hollowed cone shell look, wider band than the earlier 15%).
+        ? { yBasePct: 0.08, yTipPct: 1.00, baseRPct: 0.85, tipRPct: 0.15, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.00, depthMin: 0.65 }
+        : { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95, depthMin: 0.35 };
 
     const bbox = new THREE.Box3();
     const tmpBox = new THREE.Box3();
@@ -1365,8 +1369,7 @@ export default function Scene({
           const y = vertex.y;
           const t = Math.min(1, Math.max(0, (y - Y_BASE) / (Y_TIP - Y_BASE)));
           const baseTargetR = BASE_R * (1 - t) + TIP_R * t;
-          const DEPTH_MIN = 0.35;
-          const randF = DEPTH_MIN + Math.random() * (1.0 - DEPTH_MIN);
+          const randF = TUNING.depthMin + Math.random() * (1.0 - TUNING.depthMin);
           const targetR = baseTargetR * randF;
           const push = Math.max(0, targetR - curR);
           const finalPos = vertex.clone().addScaledVector(dir, push);

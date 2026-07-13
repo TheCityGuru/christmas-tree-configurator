@@ -6,6 +6,37 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-13 — 더퍼스트 210cm variant wired + built-in light scatter tuning
+
+### 더퍼스트 트리 210cm × 없음 wired
+
+- New asset `public/models/trees/theFirstTree_test_v2.glb` (9.1 MB) — second real 더퍼스트 GLB.
+- `App.tsx` `treeVariantModels` gains `'2-210cm-none': '/models/trees/theFirstTree_test_v2.glb'`.
+- `DEPERSE_BUILTIN_BULB_COUNT` gains `'210cm': 3050` — **placeholder** using the 180cm figure. TODO: confirm real 210cm count with client (visual density would suggest something closer to ~4800 given the ~1.6× volume scaling).
+- Everything else auto-applied via the `theFirstTree` substring gates already in Scene.tsx: 4-quadrant instancing of `spot / branch / foliage(.NNN)?`, cluster-scatter for the built-in lights, and the `treeColor` opt-out that preserves authored materials.
+
+### Built-in light scatter tuning for theFirstTree
+
+Iterating on the emissive-bulb distribution:
+
+- Promoted the previously-magic `DEPTH_MIN = 0.35` constant into the `ScatterTuning` type as `depthMin`, so each tree family owns its own value.
+- Introduced a dedicated theFirstTree TUNING entry (previously duplicated the sketch numbers). Current values:
+  - `yBasePct: 0.08, yTipPct: 1.00` — cone envelope reaches from just above the base to the actual tip
+  - `yMinKeepPct: 0.05, yMaxKeepPct: 1.00` — per-sample band trims sub-foliage floaters while still admitting crown picks
+  - `baseRPct: 0.85, tipRPct: 0.15` — wider skirt at the base, mild taper at the top (avoids collapsing to a knife-point)
+  - `rMaxKeepPct: 1.00` — reject outlier vertex picks beyond the cone envelope
+  - `depthMin: 0.65` — bulbs pin to the outer 35% of the target radius, producing the hollowed-cone-shell look (dense on the outer envelope, empty inside)
+- ultimate/fishbone and sketch families keep their prior `depthMin: 0.35` (volume-fill) — no behavior change for those.
+- Tuning still not final for the crown / base — parked to return to.
+
+### Files
+- `src/app/App.tsx` — variant map entry, `DEPERSE_BUILTIN_BULB_COUNT` extension
+- `src/app/components/Scene.tsx` — theFirstTree TUNING entry, `depthMin` in `ScatterTuning` type
+- `public/models/trees/theFirstTree_test_v2.glb` — new asset (210cm)
+- `public/screen capture/더퍼스트_트리-*.png` — light-tuning iteration references
+
+---
+
 ## 2026-07-10 — 더퍼스트 트리 wired + JS-default-ate-opt-out fix + baked lights
 
 ### 더퍼스트 트리 (theFirstTree_test.glb) wired for 180cm × 없음
