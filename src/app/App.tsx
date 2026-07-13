@@ -846,7 +846,7 @@ export default function App() {
     '1-180cm-mix':   '/models/trees/fishboneTree_twotone180.glb',
     '1-210cm-olive': '/models/trees/fishboneTree_green210.glb',
     '1-210cm-mix':   '/models/trees/fishboneTree_twotone210.glb',
-    '2-180cm-none':  '/models/trees/theFirstTree_test.glb',
+    '2-180cm-none':  '/models/trees/theFirstTree_test_v3.glb',
     '2-210cm-none':  '/models/trees/theFirstTree_test_v2.glb',
     '3-120cm-olive': '/models/trees/sketchTree_olive120.glb',
     '3-120cm-snow':  '/models/trees/sketchTree_white120.glb',
