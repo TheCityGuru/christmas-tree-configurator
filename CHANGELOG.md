@@ -6,6 +6,15 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-13 (evening) — 더퍼스트 model swaps: 180 → v4, 210 → theFirstTree_210
+
+- 180cm × 없음: `theFirstTree_test_v3.glb` → `theFirstTree_test_v4.glb` (9.2 MB)
+- 210cm × 없음: `theFirstTree_test_v2.glb` → `theFirstTree_210.glb` (10.5 MB)
+- Both are one-line swaps in `App.tsx` `treeVariantModels`. All existing substring-gated behavior (quadrant instancing, built-in light scatter, `treeColor` opt-out) auto-applies since both new files still contain the `theFirstTree` substring.
+- Prior `_test_v3` and `_test_v2` GLBs left on disk unreferenced (rollback safety).
+
+---
+
 ## 2026-07-13 (later) — 더퍼스트 180cm model swap → theFirstTree_test_v3
 
 - New asset `public/models/trees/theFirstTree_test_v3.glb` (9.2 MB) replaces the earlier `theFirstTree_test.glb` for the 180cm × 없음 slot.
