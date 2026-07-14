@@ -172,6 +172,32 @@ ornamentNormalMap.repeat.set(3.5, 3.5);
 // Dark material used to hide non-emissive objects during bloom pass
 const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
 
+// Canonical initial camera pose — reused by initial setup AND the per-tree-change reset
+// effect so switching trees always snaps back to the same starting viewpoint regardless
+// of prior orbit state.
+const INITIAL_CAMERA_POSITION = new THREE.Vector3(-1.4, 0.55, 1.2);
+const INITIAL_ORBIT_TARGET = new THREE.Vector3(0, 0.70, 0);
+
+/** Compute a model's world-space AABB, skipping meshes named `PVC*`. The PVC pipe in
+ *  several tree GLBs (sketchTree_v3+) extends below the visible stand as a hidden
+ *  structural pole; including it in the recenter would float the visible tree above
+ *  the floor. Used at both the initial recenter and the post-cloning recenter. */
+function computeRecenterBox(model: THREE.Object3D): THREE.Box3 {
+  const box = new THREE.Box3();
+  const tmpBox = new THREE.Box3();
+  model.traverse((child) => {
+    if (!(child as THREE.Mesh).isMesh) return;
+    const mesh = child as THREE.Mesh;
+    if (mesh.name.startsWith('PVC')) return;
+    if (!mesh.geometry) return;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    tmpBox.copy(mesh.geometry.boundingBox!);
+    tmpBox.applyMatrix4(mesh.matrixWorld);
+    box.union(tmpBox);
+  });
+  return box;
+}
+
 // Gray sphere markers for rearrange-mode spot positions
 const spotMarkerGeo = new THREE.SphereGeometry(0.024, 12, 12);
 const spotMarkerMat = new THREE.MeshBasicMaterial({
@@ -466,7 +492,7 @@ export default function Scene({
       0.1,
       100,
     );
-    camera.position.set(-1.4, 0.5, 1.2);
+    camera.position.copy(INITIAL_CAMERA_POSITION);
     cameraRef.current = camera;
 
     // Renderer — prefer discrete GPU, cap pixel ratio for perf
@@ -562,7 +588,7 @@ export default function Scene({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.enablePan = false;
-    controls.target.set(0, 0.65, 0);
+    controls.target.copy(INITIAL_ORBIT_TARGET);
     controls.minDistance = 1.5;
     controls.maxDistance = 4;
     controls.minPolarAngle = Math.PI * 7 / 36;   // 35°
@@ -622,10 +648,38 @@ export default function Scene({
       const groundMat = new THREE.ShadowMaterial({ opacity: 0.25 });
       const ground = new THREE.Mesh(groundGeo, groundMat);
       ground.rotation.x = -Math.PI / 2;
-      ground.position.y = 0;
+      // 1mm above env floor to avoid Z-fighting with the env's own floor plane. Both were
+      // exactly at y=0 after env-to-scene reparenting, which caused the shadow to flicker
+      // as the camera moved (depth-test tie between the two coplanar surfaces).
+      ground.position.y = 0.001;
       ground.receiveShadow = true;
       scene.add(ground);
     }
+
+    // ---- Environment (studio room) loaded ONCE at setup and anchored to the scene ----
+    // Previously the env was reloaded per tree and added as a CHILD of `model`, so it
+    // inherited the tree's recenter offset (`model.position.y = -box.min.y`). Larger trees
+    // → larger offset → env floor climbed above y=0 → OrbitControls floor clamp snapped
+    // the initial camera up. Loading once at scene setup and attaching directly to `scene`
+    // keeps env anchored at world origin so envBoxRef stays consistent across tree swaps.
+    //
+    // env.glb's floor is authored below local y=0 (visible in the fact that trees had to
+    // "float up" to match it under the old model-child parenting). Recenter env the same
+    // way we recenter trees: shift its local origin so its bottom sits at world y=0.
+    gltfLoader.load('/models/env/env.glb', (envGltf) => {
+      const envModel = envGltf.scene;
+      envModel.position.set(0, 0, 0);
+      envModel.name = 'defaultEnv';
+      envModel.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) child.receiveShadow = true;
+      });
+      envModel.updateMatrixWorld(true);
+      const envBoxLocal = new THREE.Box3().setFromObject(envModel);
+      envModel.position.y = -envBoxLocal.min.y; // lift env so its floor sits at world y=0
+      envModel.updateMatrixWorld(true);
+      scene.add(envModel);
+      envBoxRef.current = new THREE.Box3().setFromObject(envModel);
+    });
 
     // ---- Animation loop ----
     const clock = clockRef.current;
@@ -751,8 +805,15 @@ export default function Scene({
 
         const model = gltf.scene;
 
-        // Use original GLB scale (models are pre-scaled in Blender)
-        const box = new THREE.Box3().setFromObject(model);
+        // Use original GLB scale (models are pre-scaled in Blender).
+        //
+        // Bbox for recenter EXCLUDES `PVC*` meshes. In several trees (sketchTree_v3+ notably)
+        // the PVC pipe is authored to extend below the visible stand base as a hidden
+        // structural pole. Including it in the recenter would put PVC bottom on the floor
+        // and float the entire visible tree (stand + branches) above it. Skipping PVC
+        // means the recenter tracks the visible ground contact (Stand base).
+        model.updateMatrixWorld(true);
+        const box = computeRecenterBox(model);
         const center = box.getCenter(new THREE.Vector3());
 
         // Center horizontally, sit on ground
@@ -1071,33 +1132,21 @@ export default function Scene({
         // Light scatter runs in its own effect (see "Emissive lights" useEffect below)
         // so changes to selectedLight / lightCount don't require a full tree reload.
 
-        // Re-center after any cloning to ensure consistent origin
-        // Reset position first so bbox is in local space, then re-center
+        // Re-center after any cloning to ensure consistent origin.
+        // Uses the same PVC-excluded bbox as the initial recenter so the second pass
+        // doesn't undo the y-lift correction for trees with underground PVC.
         {
           model.position.set(0, 0, 0);
-          const box2 = new THREE.Box3().setFromObject(model);
+          model.updateMatrixWorld(true);
+          const box2 = computeRecenterBox(model);
           const center2 = box2.getCenter(new THREE.Vector3());
           model.position.x = -center2.x;
           model.position.z = -center2.z;
           model.position.y = -box2.min.y;
         }
 
-        // Load default environment model for every scene
-        gltfLoader.load('/models/env/env.glb', (envGltf) => {
-          const envModel = envGltf.scene;
-          envModel.position.set(0, 0, 0);
-          envModel.name = 'defaultEnv';
-          envModel.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-              child.receiveShadow = true;
-            }
-          });
-          model.add(envModel);
-          // Bake parent transforms into world matrices so the AABB is in world space,
-          // then capture the env bounding box — drives the camera clamp.
-          model.updateMatrixWorld(true);
-          envBoxRef.current = new THREE.Box3().setFromObject(envModel);
-        });
+        // (Env is now loaded once at scene setup and attached to `scene` directly — see the
+        // setup useEffect above. It no longer gets reparented under `model` per-tree.)
 
         // Tree casts shadows onto the ground plane (does not receive — keeps cost low)
         model.traverse((child) => {
@@ -1167,6 +1216,20 @@ export default function Scene({
       },
     );
     return () => { cancelled = true; };
+  }, [treeModelPath]);
+
+  // ---- Reset camera to the canonical initial pose on every tree change ----
+  // OrbitControls keeps its orbit-sphere state (theta/phi/radius derived from position -
+  // target) across renders, so a user who orbits Tree A and then switches to Tree B would
+  // otherwise view Tree B from the leftover angle. Snap both camera.position and
+  // controls.target back to their INITIAL_* constants so every tree lands in the same view.
+  useEffect(() => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    camera.position.copy(INITIAL_CAMERA_POSITION);
+    controls.target.copy(INITIAL_ORBIT_TARGET);
+    controls.update(); // recompute spherical state so next frame renders from the reset pose
   }, [treeModelPath]);
 
   // ---- Emissive lights scatter (Tree 1 / Tree 4, ultimate_tree_v2 family) ----
@@ -1775,7 +1838,8 @@ export default function Scene({
         if (!srcModel) return;
         const keepOriginalMaterial = (ornPath.includes('/ornaments/') && !ornPath.includes('/ornaments/angelina/'))
           || ornPath.includes('ribon_custom_material')
-          || ornPath.includes('Silver_Ornament_Ball_');
+          || ornPath.includes('Silver_Ornament_Ball_')
+          || ornPath.endsWith('/ornaments/angelina/bead.glb');
         const strOffset = stringOffsetByPath.get(ornPath) || new THREE.Vector3();
         const count = pathPlacements.length;
 
@@ -1941,7 +2005,8 @@ export default function Scene({
 
       const keepOriginal = (record.ornamentPath.includes('/ornaments/') && !record.ornamentPath.includes('/ornaments/angelina/'))
         || record.ornamentPath.includes('ribon_custom_material')
-        || record.ornamentPath.includes('Silver_Ornament_Ball_');
+        || record.ornamentPath.includes('Silver_Ornament_Ball_')
+        || record.ornamentPath.endsWith('/ornaments/angelina/bead.glb');
 
       const clone = srcModel.clone(true);
       clone.traverse((child) => {
@@ -2213,7 +2278,8 @@ export default function Scene({
       if (!srcModel) return null;
       const keepOriginal = (ornPath.includes('/ornaments/') && !ornPath.includes('/ornaments/angelina/'))
         || ornPath.includes('ribon_custom_material')
-        || ornPath.includes('Silver_Ornament_Ball_');
+        || ornPath.includes('Silver_Ornament_Ball_')
+        || ornPath.endsWith('/ornaments/angelina/bead.glb');
       const clone = srcModel.clone(true);
       clone.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
@@ -2394,7 +2460,8 @@ export default function Scene({
         if (!srcModel || !model) return;
         const keepOriginal = (record.ornamentPath.includes('/ornaments/') && !record.ornamentPath.includes('/ornaments/angelina/'))
           || record.ornamentPath.includes('ribon_custom_material')
-          || record.ornamentPath.includes('Silver_Ornament_Ball_');
+          || record.ornamentPath.includes('Silver_Ornament_Ball_')
+          || record.ornamentPath.endsWith('/ornaments/angelina/bead.glb');
         const clone = srcModel.clone(true);
         clone.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {

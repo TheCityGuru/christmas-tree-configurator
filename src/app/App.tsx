@@ -39,6 +39,7 @@ const ORNAMENT_SET_1: OrnamentSet = [
   { path: '/models/ornaments/angelina/Beaded_Diamond_Pendan.glb', qty: 2 },
   { path: '/models/ornaments/angelina/Spiral_Faceted_Pendan.glb', qty: 2 },
   { path: '/models/ornaments/angelina/Silver_Filigree_Duck.glb', qty: 2 },
+  { path: '/models/ornaments/angelina/bead.glb', qty: 15 },
 ];
 
 // 겨울숲 20pcs — 7 GLBs summing to exactly 20 pieces. WebP-compressed (~10 MB total on disk).
@@ -986,12 +987,11 @@ export default function App() {
     return layers;
   }, [cartItems, selectedLight, lightColors, selectedTree, selectedSize, lightWrapMode]);
 
-  // Bead string: active when any committed or preview layer references ornament#1.
-  // Single instance regardless of stack depth — they'd all render at the same origin point.
-  const beadStringActive = useMemo(() => {
-    if (selectedOrnament === 1) return true;
-    return cartItems.some(it => it.kind === 'ornament' && it.ornamentId === 1);
-  }, [cartItems, selectedOrnament]);
+  // Bead string is replaced by the `bead.glb` entry inside ORNAMENT_SET_1 (qty=15) which
+  // routes through the normal ornament-layer pipeline. The beadStringPath prop stays wired
+  // for backward compatibility, but we always pass `undefined` so the legacy single-instance
+  // renderer sits idle.
+  const beadStringActive = false;
 
   // Ornament render config — iterates every ornament layer (cart commits + panel preview),
   // resolves each layer's ORNAMENT_SET, scales by layer qty, and merges into a flat combined

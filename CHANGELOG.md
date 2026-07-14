@@ -6,6 +6,54 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-14 (late) — Camera lock, env reparenting, tree recenter fix, bead ornament restored
+
+### Camera pose locks to canonical initial view on every tree change
+
+- User report: camera "shifted position" when switching trees (most visibly with sketchTree_v3_olive150).
+- Root cause: OrbitControls persists its orbit-sphere state (theta / phi / radius) across renders. After orbiting Tree A, that state carried into Tree B, so the framing looked shifted even though `camera.position` and `controls.target` were unchanged.
+- Fix: extracted `INITIAL_CAMERA_POSITION` (`-1.4, 0.55, 1.2`) and `INITIAL_ORBIT_TARGET` (`0, 0.70, 0`) as module-scope constants so setup and reset agree on one source of truth; added a `useEffect(_, [treeModelPath])` in Scene.tsx that snaps both back on every tree change, then calls `controls.update()` so the internal spherical state re-derives from the reset pose.
+- Also raised the initial camera height by 5cm (`0.50 → 0.55`) and orbit target by 5cm (`0.65 → 0.70`) — coupled bumps keep the initial pitch angle unchanged.
+
+### Env moved from `model` child to `scene` child + self-recentered
+
+- Env.glb was `model.add(envModel)`, so it inherited the tree's recenter offset (`model.position.y = -box.min.y`). Larger trees → larger offset → env floor climbed above y=0 → OrbitControls floor clamp snapped the initial camera up on the sketchTree_v3 tree. That was the "camera shifts on this specific tree" symptom.
+- Env is now loaded once at scene setup and attached directly to `scene`. `envBoxRef` — which drives the floor clamp — is now constant across tree swaps.
+- Env.glb's Plane mesh is authored below local y=0. Under the old parent-of-model setup, `model.position.y` happened to lift env's floor up to coincide with the tree ground. Under the new setup, env was visually below world y=0 → tree "floated" above it. Fixed with `envModel.position.y = -envBoxLocal.min.y` — same recenter pattern applied to env so its floor sits at world y=0 by construction.
+
+### Tree recenter now skips `PVC*` meshes + shared helper for both passes
+
+- sketchTree_v3+ authors a `PVC` pipe that extends below the visible stand base (hidden structural pole). Old recenter used vanilla `Box3.setFromObject(model)`, so `box.min.y` = PVC's underground extent → recenter over-lifted the tree by ~36cm. Was hidden by env-following-model; became visible after the env reparent.
+- Fixed with a module-scope helper `computeRecenterBox(model)` that walks meshes and skips any `startsWith('PVC')` mesh. Applied at BOTH recenter sites in the tree-load useEffect (initial recenter before quadrant instancing AND the post-cloning recenter that runs after node instancing) so they agree — earlier only the first was fixed and the second was undoing it.
+
+### Shadow flicker fix — ground plane raised 1mm above env floor
+
+- After env-to-scene reparenting + env self-recenter, both env's authored floor plane AND the dedicated `ShadowMaterial` ground plane sit at exactly `y=0`. Camera motion flipped the depth-test winner between the two coplanar surfaces → shadow flickered.
+- Raised the shadow ground to `y=0.001` (1mm) — invisible to the eye, but a clean depth priority for the shadow-receiving plane over the env floor.
+
+### Angelina 엔젤리나 bead — bead_string.glb → bead.glb (qty 15)
+
+- `ORNAMENT_SET_1` gains `{ path: '/models/ornaments/angelina/bead.glb', qty: 15 }`.
+- `beadStringActive` useMemo replaced with a `const beadStringActive = false;` so the legacy single-instance `bead_string.glb` renderer stays dormant. Prop wiring kept for cheap rollback if we ever want the chain-string look back.
+- **Blender Geometry Nodes bug — same one 핑크루체 hit**: new `bead.glb` shipped with `EXT_mesh_gpu_instancing` on the `BézierCurve.003` node (20 GN-authored bead positions). Three.js placement code reads only `srcMesh.geometry` and drops per-instance transforms silently → single-sphere stubs instead of a bead cluster.
+- Fixed by re-running `scripts/bake_gn_instances.mjs` on the file — extension expanded into 20 explicit child nodes, extension removed from used list. Node count 3 → 23, size 18.9 KB → 22.6 KB.
+- **Material override exception**: appended `|| ornPath.endsWith('/ornaments/angelina/bead.glb')` to the `keepOriginal` gate at all 4 override sites in Scene.tsx (`1839, 2005, 2277, 2458`) so the bead's authored `KHR_materials_clearcoat` PBR renders as-shipped instead of getting swapped for the silver PBR override that every other angelina item gets.
+
+### Diagnostic scripts kept in `scripts/`
+
+- `scripts/inspect_glb.mjs` — raw-JSON GLB structure inspector (no deps). Prints scene/node/mesh/camera/animation/extension counts, top-level node positions, any camera-attached nodes, anomalous transforms, and any nodes carrying `EXT_mesh_gpu_instancing` with per-node instance counts. Used to catch the sketchTree_v3 PVC extension issue and the angelina bead GN extension.
+- `scripts/inspect_bbox.mjs` — uses three.js to actually load a GLB and compute per-mesh world-space bboxes. Used to verify PVC-excluded `box.min.y` in v3.
+- `scripts/bake_gn_instances.mjs` — the existing GN-instance baker (already documented from 핑크루체's incident) — now re-run on `bead.glb`.
+
+### Files
+- `src/app/App.tsx` — `ORNAMENT_SET_1` gains bead entry (qty 15); `beadStringActive` set to `false`.
+- `src/app/components/Scene.tsx` — `INITIAL_CAMERA_POSITION` / `INITIAL_ORBIT_TARGET` module consts; `computeRecenterBox()` helper; env loaded at setup + self-recentered; per-tree-change camera reset effect; ground plane at y=0.001; angelina bead material-override exception at 4 sites.
+- `public/models/ornaments/angelina/bead.glb` — new asset (GN-baked).
+- `scripts/inspect_glb.mjs`, `scripts/inspect_bbox.mjs` — new diagnostic scripts.
+- `public/screen capture/스케치_트리_올리브_스노우_-*.png` — sketch v3 recenter iteration screenshots.
+
+---
+
 ## 2026-07-14 — sketchTree v3 wired + node-naming regex extended + bloom/light tuning
 
 ### sketchTree_v3_olive150.glb wired for 3-150cm-올리브
