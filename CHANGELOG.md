@@ -6,6 +6,35 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-13 (night) — Light distribution tuning + selective per-object bloom
+
+### Light distribution — hollowed-cone shell now applied to all families
+
+- Promoted `depthMin` from a per-family value to a scene-wide constant at `0.65` across ultimate/fishbone, sketch, and theFirstTree — every family now uses the outer-35% shell distribution (dense on the outer envelope, empty inside). Per-family y-band and radial numbers still differ per model geometry.
+- theFirstTree scatter tuning iterated:
+  - `yMinKeepPct: 0.05 → 0.11 → 0.08` — swung too aggressive, back to a compromise that trims deep floaters without starving the skirt.
+  - `yBasePct` matched the moving floor at each step (0.08 → 0.14 → 0.10).
+  - `tipRPct: 0.15 → 0.28 → 0.20` — 0.28 pushed bulbs past the visible tip silhouette (isolated above-tip floaters); 0.20 is the middle-ground that reaches the crown without launching bulbs out of the tree.
+  - `yMaxKeepPct: 1.00 → 0.96` — new upper trim rejects vertex picks in the top ~4% (~7cm on 180cm) to kill leftover above-tip floaters.
+
+### Selective per-object bloom
+
+- The bloom pass is already gated to emissives (non-emissives get swapped to `darkMaterial` during the bloom render). Extended this so different emissive categories bloom at different strengths.
+- **Constants** near the bloom composer setup:
+  - `BLOOM_STRENGTH_LIGHTS = 0.5` — the actual `UnrealBloomPass` strength; drives tree-light halos.
+  - `BLOOM_STRENGTH_OTHER = 0.0` — target strength for anything else emissive.
+  - `OTHER_EMISSIVE_SCALE = BLOOM_STRENGTH_OTHER / BLOOM_STRENGTH_LIGHTS` — the per-frame multiplier applied to non-light emissives during the bloom render.
+- **How it works**: bloom brightness is proportional to `bloom.strength × mat.emissiveIntensity`. Since the pass strength is a global scalar, we simulate a lower "other" strength by temporarily scaling non-light `emissiveIntensity` during the bloom render, then restoring immediately. The base scene render is unaffected.
+- **Tagging**: `buildGroup()` in the scatter effect stamps every InstancedMesh with `userData.isTreeLight = true`. The bloom traversal checks that tag before deciding whether to scale.
+- **Cache scheme**: `emissiveIntensityCache` is keyed by MATERIAL (not mesh) so a material shared across many meshes only gets scaled once per frame; restored after bloom render in the same pass that restores swapped materials.
+- **Scope**: this only affects the bloom halo, not the base-scene emissive glow. Any ornament GLB shipping with authored emissive still glows in the base render — killing that too would require a load-time emissive zero-out (deferred).
+
+### Files
+- `src/app/components/Scene.tsx` — bloom constants + tag + emissive intensity cache; iterated scatter TUNING for theFirstTree; unified `depthMin` across all families.
+- `public/screen capture/더퍼스트_트리-14{2730,3508}.png` — light-tuning iteration references.
+
+---
+
 ## 2026-07-13 (evening) — 더퍼스트 model swaps: 180 → v4, 210 → theFirstTree_210
 
 - 180cm × 없음: `theFirstTree_test_v3.glb` → `theFirstTree_test_v4.glb` (9.2 MB)

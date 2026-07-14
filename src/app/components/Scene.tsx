@@ -490,6 +490,14 @@ export default function Scene({
     // Bloom composer: renders scene with non-emissive objects blacked out.
     // Use MSAA + HalfFloat render target to eliminate sub-pixel aliasing flicker
     // on small emissive meshes (tree lights) when the camera moves.
+    //
+    // Per-object bloom weighting: the bloom pass strength is a global scalar, so to make
+    // non-light emissives (e.g. ornaments with authored emissive) bloom LESS than tree
+    // lights, we set the pass strength to the LIGHTS value and temporarily scale down
+    // non-light emissiveIntensity during the bloom render only (see animate() below).
+    const BLOOM_STRENGTH_LIGHTS = 0.5;
+    const BLOOM_STRENGTH_OTHER = 0.0;
+    const OTHER_EMISSIVE_SCALE = BLOOM_STRENGTH_OTHER / BLOOM_STRENGTH_LIGHTS;
     const bloomRT = new THREE.WebGLRenderTarget(
       container.clientWidth,
       container.clientHeight,
@@ -503,9 +511,9 @@ export default function Scene({
     bloomComposer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(container.clientWidth, container.clientHeight),
-      0.5,  // strength
-      1.0,   // radius
-      0.0,   // threshold
+      BLOOM_STRENGTH_LIGHTS,  // strength
+      1.0,                    // radius
+      0.0,                    // threshold
     );
     bloomComposer.addPass(bloomPass);
 
@@ -548,6 +556,7 @@ export default function Scene({
     // Store for animation loop
     const bloomState = { bloomComposer, bloomOverlayScene, bloomOverlayCamera, bloomOverlayMat };
     const materialCache = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+    const emissiveIntensityCache = new Map<THREE.MeshStandardMaterial, number>();
 
     // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -634,7 +643,13 @@ export default function Scene({
           const mesh = obj as THREE.Mesh;
           const mat = mesh.material as THREE.MeshStandardMaterial;
           if (mat.isMeshStandardMaterial && mat.emissiveIntensity > 0 && mat.emissive && mat.emissive.getHSL({ h: 0, s: 0, l: 0 }).l > 0) {
-            // Emissive — keep for bloom
+            // Emissive — keep for bloom. Tree-light InstancedMeshes are tagged with
+            // userData.isTreeLight during scatter; anything else emissive (e.g. ornaments
+            // with authored emissive) gets its intensity scaled down so it blooms less.
+            if (!mesh.userData?.isTreeLight && !emissiveIntensityCache.has(mat)) {
+              emissiveIntensityCache.set(mat, mat.emissiveIntensity);
+              mat.emissiveIntensity *= OTHER_EMISSIVE_SCALE;
+            }
           } else {
             materialCache.set(mesh, mesh.material);
             mesh.material = darkMaterial;
@@ -654,6 +669,8 @@ export default function Scene({
       // Restore materials and environment
       materialCache.forEach((mat, mesh) => { mesh.material = mat; });
       materialCache.clear();
+      emissiveIntensityCache.forEach((intensity, mat) => { mat.emissiveIntensity = intensity; });
+      emissiveIntensityCache.clear();
       scene.background = prevBg;
       scene.environment = prevEnv;
 
@@ -1250,19 +1267,22 @@ export default function Scene({
       depthMin: number;   // randF ∈ [depthMin, 1.0]; higher = shells lights near outer envelope,
                           // lower = fills the volume. 1.0 → all on outer shell (hollow cone).
     };
+    // depthMin 0.65 across all families → bulbs land in outer 35% of target radius,
+    // producing a hollowed-cone-shell distribution (dense on the outer envelope, empty
+    // inside). Applied uniformly per user request 2026-07-13.
     const TUNING: ScatterTuning = isUltimate
       // baseR 1.45 × maxR pushes lights to the visible foliage edge. Was 1.30; bumped to
       // sit further outward per user feedback. Per-sample rMaxKeep loosened to 1.75 to
       // ensure even the widest vertex picks remain inside the silhouette after push.
-      ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.45, tipRPct: 0.32, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.75, depthMin: 0.35 }
+      ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.45, tipRPct: 0.32, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.75, depthMin: 0.65 }
       : isTheFirstTree
-        // theFirstTree: `branch`/`foliage` clusters both host bulbs. Wider y-band (0.05→1.00)
-        // so the cone reaches both the tip and the bottom skirt of the visible foliage.
-        // tipRPct 0.15 keeps some spread at the crown instead of collapsing to a knife-point.
-        // depthMin 0.65 → randF ∈ [0.65, 1.0] → bulbs pin to the outer 35% of the target
-        // radius (hollowed cone shell look, wider band than the earlier 15%).
-        ? { yBasePct: 0.08, yTipPct: 1.00, baseRPct: 0.85, tipRPct: 0.15, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.00, depthMin: 0.65 }
-        : { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95, depthMin: 0.35 };
+        // theFirstTree: `branch`/`foliage` clusters both host bulbs. Split the difference
+        // from the prior swing — yMinKeep 0.08 (was 0.11 → skirt starved) restores bottom
+        // coverage while still trimming the deepest floaters. tipRPct 0.20 (was 0.28 →
+        // bulbs above tip silhouette) narrows the crown push. yMaxKeepPct 0.96 rejects the
+        // top ~4% of vertex picks (~7cm on 180cm) so leftover-above-tip floaters get culled.
+        ? { yBasePct: 0.10, yTipPct: 1.00, baseRPct: 0.85, tipRPct: 0.20, yMinKeepPct: 0.08, yMaxKeepPct: 0.96, rMaxKeepPct: 1.00, depthMin: 0.65 }
+        : { yBasePct: 0.05, yTipPct: 0.90, baseRPct: 0.85, tipRPct: 0.12, yMinKeepPct: 0.02, yMaxKeepPct: 0.92, rMaxKeepPct: 0.95, depthMin: 0.65 };
 
     const bbox = new THREE.Box3();
     const tmpBox = new THREE.Box3();
@@ -1410,6 +1430,7 @@ export default function Scene({
       const mesh = new THREE.InstancedMesh(geo, mat, positions.length);
       mesh.name = name;
       mesh.userData.blinkGroup = blinkGroup;
+      mesh.userData.isTreeLight = true; // bloom pass keeps these at full BLOOM_STRENGTH_LIGHTS
       const tmpM = new THREE.Matrix4();
       const tmpS = new THREE.Vector3(1, 1, 1);
       const tmpQ = new THREE.Quaternion();
