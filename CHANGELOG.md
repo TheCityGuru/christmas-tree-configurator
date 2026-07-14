@@ -6,6 +6,35 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-14 — sketchTree v3 wired + node-naming regex extended + bloom/light tuning
+
+### sketchTree_v3_olive150.glb wired for 3-150cm-올리브
+
+- New asset `public/models/trees/sketchTree_v3_olive150.glb` (9.4 MB) — updated sketchTree base model.
+- `App.tsx` `treeVariantModels['3-150cm-olive']`: `sketchTree_olive150.glb` → `sketchTree_v3_olive150.glb`.
+- Other references to the old olive150 (line 863 for Tree 4 150cm size-fallback, and tree default fallbacks for Tree 3/4) still point at the pre-v3 file — flagged to user for later.
+
+### Node-naming regex extended for the sketchTree family
+
+- v3 exports dropped the `sketchBranch` prefix, using plain `branch` / `branch.NNN` instead. Two regexes updated to accept both naming conventions (still substring-gated on `sketchTree` so no cross-family collision):
+  - Quadrant instancing block (Scene.tsx `~L986`): `/^sketchBranch(\.\d{3}|\d{3})?$/` → `/^(?:sketchBranch|branch)(\.\d{3}|\d{3})?$/`
+  - Light-scatter cluster discovery (Scene.tsx `~L1215`): `/^sketchBranch/` → `/^(?:sketchBranch|branch)/`
+- Older sketchTree variants (`sketchTree_olive*.glb`, `sketchTree_white*.glb`) keep working via the `sketchBranch` alternate.
+- Spot beacon cloning was already `child.name.startsWith('spot')` — no change needed.
+
+### Light rendering tuning
+
+- **Selective per-object bloom** — `BLOOM_STRENGTH_LIGHTS` finalized at **0.3** (was 0.5 → 0.45 → 0.3 over the iteration); `BLOOM_STRENGTH_OTHER` set to **0.0** so any authored emissive on ornaments contributes zero to bloom. Base scene render still shows the raw emissive color (only halo is killed).
+- **Light material emissive intensity** bumped **4.2 → 13** at the source constructor in `buildGroup()` AND at the `setBlinkGroupLit(tag, lit=true)` restore point so the ON/blink/OFF cycle stays consistent. Net bloom-driving product went from `0.65 × 4.2 = 2.73` to `0.3 × 13 = 3.9` (~43% brighter halos, punchier bulbs).
+- **Light mesh geometry** shrunk **6mm diameter → 4.5mm** (`SphereGeometry` radius `0.003 → 0.00225`). Tighter individual bulb footprint with a stronger emissive signal — reads as sharper points of light.
+
+### Files
+- `src/app/App.tsx` — sketchTree_v3_olive150 variant swap
+- `src/app/components/Scene.tsx` — sketch quadrant regex + cluster regex extensions; bloom/emissive/geometry tuning
+- `public/models/trees/sketchTree_v3_olive150.glb` — new asset
+
+---
+
 ## 2026-07-13 (night) — Light distribution tuning + selective per-object bloom
 
 ### Light distribution — hollowed-cone shell now applied to all families

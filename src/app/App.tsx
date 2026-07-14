@@ -850,7 +850,7 @@ export default function App() {
     '2-210cm-none':  '/models/trees/theFirstTree_210.glb',
     '3-120cm-olive': '/models/trees/sketchTree_olive120.glb',
     '3-120cm-snow':  '/models/trees/sketchTree_white120.glb',
-    '3-150cm-olive': '/models/trees/sketchTree_olive150.glb',
+    '3-150cm-olive': '/models/trees/sketchTree_v3_olive150.glb',
     '3-180cm-olive': '/models/trees/sketchTree_olive180.glb',
     '3-180cm-snow':  '/models/trees/sketchTree_white180.glb',
     '3-210cm-olive': '/models/trees/sketchTree_olive210.glb',

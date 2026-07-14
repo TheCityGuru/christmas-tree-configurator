@@ -495,7 +495,7 @@ export default function Scene({
     // non-light emissives (e.g. ornaments with authored emissive) bloom LESS than tree
     // lights, we set the pass strength to the LIGHTS value and temporarily scale down
     // non-light emissiveIntensity during the bloom render only (see animate() below).
-    const BLOOM_STRENGTH_LIGHTS = 0.5;
+    const BLOOM_STRENGTH_LIGHTS = 0.3;
     const BLOOM_STRENGTH_OTHER = 0.0;
     const OTHER_EMISSIVE_SCALE = BLOOM_STRENGTH_OTHER / BLOOM_STRENGTH_LIGHTS;
     const bloomRT = new THREE.WebGLRenderTarget(
@@ -979,11 +979,12 @@ export default function Scene({
         }
 
         // For sketchTree: 4-quadrant tree (same pattern as ultimate_tree_v2).
-        // Clone every `sketchBranch[.NNN]` node and every `spot.NNN` beacon at 90°, 180°, 270°.
+        // Clone every branch node and every `spot.NNN` beacon at 90°, 180°, 270°.
+        // Older exports use `sketchBranch[.NNN]`; sketchTree_v3+ uses plain `branch[.NNN]`.
         if (treeModelPath.includes('sketchTree')) {
           const rotations = [Math.PI / 2, Math.PI, Math.PI * 3 / 2];
-          // Blender may export "sketchBranch.001" as either "sketchBranch.001" or "sketchBranch001"
-          const sketchBranchRe = /^sketchBranch(\.\d{3}|\d{3})?$/;
+          // Blender may preserve or strip dots (`sketchBranch.001` → `sketchBranch001`).
+          const sketchBranchRe = /^(?:sketchBranch|branch)(\.\d{3}|\d{3})?$/;
           const yAxis = new THREE.Vector3(0, 1, 0);
           const clones: THREE.Object3D[] = [];
 
@@ -1215,7 +1216,8 @@ export default function Scene({
         // Blender exports either way; optional `_rot_N` suffix covers clones added by the
         // quadrant instancing block above.
         ? /^(?:foliage|branch)(?:\.\d{3}|\d{3})?(?:_rot_\d+)?$/
-        : /^sketchBranch/;
+        // sketchTree: older exports use `sketchBranch*`; v3+ uses plain `branch*`.
+        : /^(?:sketchBranch|branch)/;
     model.updateMatrixWorld(true);
     const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
 
@@ -1421,11 +1423,11 @@ export default function Scene({
       name: string,
     ): THREE.InstancedMesh | null => {
       if (positions.length === 0) return null;
-      const geo = new THREE.SphereGeometry(0.003, 10, 8);
+      const geo = new THREE.SphereGeometry(0.00225, 10, 8);
       const mat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         emissive: new THREE.Color(colorHex),
-        emissiveIntensity: 4.2,
+        emissiveIntensity: 13,
       });
       const mesh = new THREE.InstancedMesh(geo, mat, positions.length);
       mesh.name = name;
@@ -1503,7 +1505,7 @@ export default function Scene({
       treeLightGroupsRef.current.forEach((mesh) => {
         if (mesh.userData.blinkGroup !== tag) return;
         const mat = mesh.material as THREE.MeshStandardMaterial;
-        mat.emissiveIntensity = lit ? 4.2 : 0;
+        mat.emissiveIntensity = lit ? 13 : 0;
         mat.needsUpdate = true;
       });
     };
