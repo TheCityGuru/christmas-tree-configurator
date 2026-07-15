@@ -6,6 +6,69 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-16 (late) — 7-slot color-is-tree restructure, cluster matrix, point ornaments, pick-highlight fix, ornament loading bar
+
+### 트리 slots — color is now the tree
+
+Every color variant is its own slot on Page 1. Old 4-slot × color-selector UI removed; 7 flat slots replace it.
+
+- 슬롯 1..7: 피시본(그린), 피시본(투톤), 더퍼스트, 스케치(올리브), 스케치(스노우), 스케치(로즈), 스케치(핑크).
+- Downstream keyed tables migrated to 1..7 ids:
+  - `TREE_COLOR_GROUP` — fishbone/deperse/sketch-olive/sketch-pink remapped
+  - `treeVariantModels` — color suffix renamed: `-olive→-green`, `-mix→-twotone`, `-none` stays; adds `-olive`/`-twotone` per size
+  - `treeSizeFallbackModels` — slots 5/6/7 (snow/rose/pink) fall through to v3 olive at each size then get treeColor tint
+  - `treeDefaultModel` — one entry per slot
+  - `treeOptionsMap` — each slot has exactly ONE pinned color (kept as array to preserve downstream lookups)
+  - `treeNames`, `treeThumbnails` — rebuilt for 7 slots using existing files in `public/thumbnails/tree/`
+  - `CLUSTER_LIGHT_VARIANTS` — remigrated (see next section)
+  - `selectedTree === 2` deperse guards → `=== 3` (lightLayers builtIn + Page 2 modal)
+- `selectedColor` state kept as-is per user request; tree-change useEffect snaps it to the slot's pinned color.
+- Cart row name simplified: `"${baseName} ${size}"` — color now baked into baseName (e.g. `"피시본 트리(그린) 150cm"`).
+- 컬러 선택 selector block removed from Page 1 UI. Palette icon import kept (used by Page 2's bulb/wire color selectors).
+
+### 클러스터 GLB matrix — dense/normal/front × 4 sizes × 6 applicable slots
+
+Full authored cluster GLBs replace the single-file wire.
+
+- Files: `cluster_light_sketch{120,150,180,210}_{normal,dense,front}.glb` — 12 GLBs. Renamed original `cluster_light_sketch150.glb` → `_normal` for naming consistency (via `git mv`, tracked as rename).
+- `CLUSTER_LIGHT_VARIANTS` map deleted; replaced with `CLUSTER_APPLICABLE_SLOTS = Set<number>([1, 2, 4, 5, 6, 7])` + `getClusterGlbPath(treeId, size, wrap)` helper that computes the path deterministically from wrap mode (`front`/`360`→`_normal`/`360-dense`→`_dense`).
+- App now passes `getClusterGlbPath(selectedTree, selectedSize, lightWrapMode)` to `<Scene>`. Scene's cluster-load useEffect already had `clusterGlbPath` in its deps, so wrap-mode changes reload the right GLB live.
+- All 6 applicable slots (fishbone + sketch families) at all 4 sizes × 3 wrap modes now render authored cluster geometry.
+
+### 클러스터 gains 촘촘 option
+
+Removed `cluster` from the two "collapse to single 360" gates so 촘촘 button shows in the 전구 감기 옵션 UI and the auto-snap on light-change no longer demotes cluster's `'360-dense'` to `'360'`. LED still keeps the single-360 behavior.
+
+Cluster's `CART_SET_COUNT_TABLE` entries already had `'360'` and `'360-dense'` set to identical values (from the client's #전구 PDF), so no cart-data change was needed.
+
+### Page 4 (포인트 오너먼트) — 4 slots → 1, with real GLB rendering
+
+- Slot count `[1,2,3,4] → [1]`. Slot 1 renamed to **오로라 리본** with thumbnail `aurora_ribbon.png`.
+- New `POINT_ORNAMENT_SET_1` array (parallel to `ORNAMENT_SET_N` shape) → `Iridescent_Ribbon_Bow.glb @ qty=12`. New `POINT_ORNAMENT_SETS` map keyed by point catalog id.
+- `scaledOrnamentConfig` useMemo refactored: `addLayer(setsMap, id, qty)` now takes a set-map parameter so both regular ornaments (`ORNAMENT_SETS` from `kind: 'ornament'` cart items + preview) AND point ornaments (`POINT_ORNAMENT_SETS` from `kind: 'point'` cart items + preview) merge into the same path→qty flat list. Scene renders both via the same beacon-placement pipeline — no scene-side changes needed.
+- Deps of `scaledOrnamentConfig` extended: `selectedPointOrnament, pointOrnamentQty`.
+
+### Rearrange-mode pick highlight fix — non-angelina ornaments now glow blue
+
+- `createHighlightClone` in Scene.tsx had a two-branch material path: angelina items got `createSilverMaterial()` + blue emissive, everyone else cloned the authored PBR + tried to set blue emissive. Authored `MeshPhysicalMaterial` with `clearcoat`/`sheen`/`transmission` + dense base-color maps visually dominated the 0.6-intensity emissive → blue was invisible on candy_shop / rich_alvin / pink_luche / etc.
+- Fix: dropped the branching; the pick-highlight clone always uses silver+blue now. The highlight is a transient pick-state marker; matching authored PBR isn't the goal, unambiguity is. Other three material-override sites (actual scene render) still preserve authored materials.
+
+### Ornament loading progress bar
+
+- Only tree loads fed `loadProgress`; ornament loads (up to ~85 MB for rich_alvin) were silent.
+- Ornament placement useEffect now counts uncached paths, resets progress to 0%, and each individual `gltfLoader.load` `onLoad` bumps the bar smoothly to `100 * completed / uncached`. When the whole `Promise.all` resolves and placement is applied, the bar hits 100% and fades over 400ms — same lifecycle as the tree loader.
+- Skips entirely when every path is a cache hit (no distracting flash on cheap swaps).
+
+### Files
+- `src/app/App.tsx` — 7-slot tree data model migration; `CLUSTER_APPLICABLE_SLOTS` + helper; cluster 촘촘 gates; Page 4 slot count / names / thumbnails; `POINT_ORNAMENT_SET_1` + `POINT_ORNAMENT_SETS`; `scaledOrnamentConfig` refactor; cart naming; misc `selectedTree === 2` → `=== 3` migrations.
+- `src/app/components/Scene.tsx` — pick-highlight material simplification; ornament loading bar wiring.
+- `public/models/light/cluster_light_sketch150.glb` renamed → `_normal.glb`.
+- `public/models/light/cluster_light_sketch{120,150,180,210}_{dense,front,normal}.glb` — 11 new GLBs (150_normal is the rename).
+- `public/models/ornaments/point/Iridescent_Ribbon_Bow.glb` — new asset (오로라 리본).
+- `public/thumbnails/point/aurora_ribbon.png` — new asset.
+
+---
+
 ## 2026-07-16 — 클러스터 GLB architecture, 스케치 v3 fleet complete, 파스텔팝 punch-up
 
 ### 클러스터 (cluster) light — full-authored GLB per (tree × size) instead of scatter

@@ -252,6 +252,16 @@ const ORNAMENT_SETS: Record<number, OrnamentSet> = {
 // Back-compat alias — some downstream code still references ORNAMENT_CONFIG.
 const ORNAMENT_CONFIG = ORNAMENT_SET_1;
 
+// ---- Point ornaments — parallel to ORNAMENT_SETS, keyed by point catalog id ----
+// Point ornaments render through the same beacon-placement pipeline as regular ornaments;
+// scaledOrnamentConfig merges both into one flat path→qty list handed to Scene.
+const POINT_ORNAMENT_SET_1: OrnamentSet = [
+  { path: '/models/ornaments/point/Iridescent_Ribbon_Bow.glb', qty: 12 }, // 오로라 리본
+];
+const POINT_ORNAMENT_SETS: Record<number, OrnamentSet> = {
+  1: POINT_ORNAMENT_SET_1,
+};
+
 // ============================================================================
 // LIGHT RECOMMENDATION TABLES
 // Two parallel lookups feed the wrap-mode buttons:
@@ -266,12 +276,16 @@ type TreeColorGroup = 'fishbone' | 'sketch-olive' | 'sketch-pink' | 'deperse';
 type WrapKey = 'front' | '360' | '360-dense';
 
 // Tree slot id → color/family group used as #트리 row key.
-// 더퍼스트 (2) is 'deperse' — the table has all dashes, so any lookup → 0.
+// Tree slots are now split per color (2026-07-16 late) — each color variant is its own slot.
+// 더퍼스트 (3) is 'deperse' — the table has all dashes, so any lookup → 0.
 const TREE_COLOR_GROUP: Record<number, TreeColorGroup> = {
-  1: 'fishbone',      // 피시본 트리 — 그린/투톤 (same numbers as sketch-olive per #트리)
-  2: 'deperse',       // 더퍼스트 트리 — table empty
-  3: 'sketch-olive',  // 스케치 트리 (올리브/스노우)
-  4: 'sketch-pink',   // 스케치 트리 (핑크/로즈) — no 120cm row
+  1: 'fishbone',      // 피시본 트리(그린)
+  2: 'fishbone',      // 피시본 트리(투톤) — same #트리 row as 그린
+  3: 'deperse',       // 더퍼스트 트리 — table empty
+  4: 'sketch-olive',  // 스케치 트리(올리브)
+  5: 'sketch-olive',  // 스케치 트리(스노우) — same #트리 row as 올리브
+  6: 'sketch-pink',   // 스케치 트리(로즈)
+  7: 'sketch-pink',   // 스케치 트리(핑크) — same #트리 row as 로즈
 };
 
 // Light product (selectedLight 1-5) → which #트리 column to use.
@@ -329,14 +343,20 @@ const DEPERSE_BUILTIN_BULB_COUNT: Record<string, number> = {
   '210cm': 3050, // TODO: confirm 210cm bulb count with client
 };
 
-// 클러스터 (lightId=4) can use a full-authored GLB per (tree × size) instead of the
-// procedural bulb scatter. Only variants listed here get the GLB; anything else falls back
-// to the code-generated scatter. Keyed as `{treeId}-{size}`.
-const CLUSTER_LIGHT_VARIANTS: Record<string, string> = {
-  '3-150cm': '/models/light/cluster_light_sketch150.glb',
-};
-function getClusterGlbPath(treeId: number, size: string): string | undefined {
-  return CLUSTER_LIGHT_VARIANTS[`${treeId}-${size}`];
+// 클러스터 (lightId=4) uses a full-authored GLB per (tree × size × wrap mode) instead of
+// the procedural bulb scatter. The GLBs are the same "cluster_light_sketch{size}_{suffix}"
+// set for every applicable slot — fishbone + sketch trees all reuse them (the cluster
+// hardware itself is tree-agnostic; only size + wrap mode differ). 더퍼스트 (3) doesn't use
+// add-on lights, so it's excluded.
+const CLUSTER_APPLICABLE_SLOTS = new Set<number>([1, 2, 4, 5, 6, 7]);
+function getClusterGlbPath(treeId: number, size: string, wrap: WrapKey): string | undefined {
+  if (!CLUSTER_APPLICABLE_SLOTS.has(treeId)) return undefined;
+  const sizeNum = parseInt(size, 10); // '150cm' → 150
+  if (!Number.isFinite(sizeNum)) return undefined;
+  const suffix = wrap === 'front' ? '_front'
+              : wrap === '360-dense' ? '_dense'
+              : '_normal'; // wrap === '360' → 보통
+  return `/models/light/cluster_light_sketch${sizeNum}${suffix}.glb`;
 }
 
 /** Returns the recommended scene-render bulb count from #트리. Returns 0 when no data. */
@@ -480,7 +500,7 @@ export default function App() {
   const nextUid = () => cartUidRef.current++;
   const [cartJingle, setCartJingle] = useState(false);
 
-  // 더퍼스트 (treeId=2) is 전구 일체형 — built-in baked lights, no additional light products allowed.
+  // 더퍼스트 (treeId=3) is 전구 일체형 — built-in baked lights, no additional light products allowed.
   // Surfaces a modal when the user tries to interact with any light item on page 2.
   const [showDeperseAlert, setShowDeperseAlert] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -488,7 +508,11 @@ export default function App() {
 
   // Side Button States
   const [selectedSize, setSelectedSize] = useState("150cm");
-  const [selectedColor, setSelectedColor] = useState("olive");
+  // Each tree slot has exactly one pinned color as of the 7-slot restructure. selectedColor is
+  // kept as state so downstream lookups (`treeVariantModels` keys, cart snapshot's `color`
+  // field, etc.) don't need broader refactoring — the snap effect syncs it to the slot's
+  // pinned color on every tree change.
+  const [selectedColor, setSelectedColor] = useState("green");
   // Light mode: 'on' | 'blink' | 'off'
   const [lightMode, setLightMode] = useState<'on' | 'blink' | 'off'>('on');
   const cycleLightMode = () => setLightMode((prev) => prev === 'on' ? 'blink' : prev === 'blink' ? 'off' : 'on');
@@ -651,7 +675,7 @@ export default function App() {
     }
     setLightWrapMode((prev) => {
       let next: WrapKey = prev === 'front' ? '360' : prev;
-      if (next === '360-dense' && (family === 'led' || family === 'cluster')) {
+      if (next === '360-dense' && family === 'led') {
         next = '360';
       }
       return next;
@@ -672,33 +696,37 @@ export default function App() {
     sceneColor: string;     // hex passed to Scene's treeColor prop
   };
   type TreeOptions = { sizes: string[]; colors: TreeColorOption[] };
+  // Each slot has exactly ONE pinned color (each color variant is its own slot as of
+  // 2026-07-16 late). The `colors` array is kept to preserve downstream lookups (`.colors[0]`)
+  // and cart snapshot (`.color` field), but the UI no longer offers a color selector.
   const treeOptionsMap: Record<number, TreeOptions> = {
-    1: { // 피시본 트리 — colors unchanged from prior UI (그린 + 믹스 투톤)
+    1: { // 피시본 트리(그린)
       sizes: ['120', '150', '180', '210'],
-      colors: [
-        { name: 'olive', label: '그린',     swatch: { kind: 'solid', color: '#4a5d23' }, sceneColor: '#4a5d23' },
-        { name: 'mix',   label: '믹스 투톤', swatch: { kind: 'gradient', from: '#4a5d23', to: 'rgb(192, 207, 194)' }, sceneColor: '#4a5d23' },
-      ],
+      colors: [{ name: 'green',   label: '그린',   swatch: { kind: 'solid', color: '#4a5d23' }, sceneColor: '#4a5d23' }],
     },
-    2: { // 더퍼스트 트리 — no color options; single gray "없음" placeholder
+    2: { // 피시본 트리(투톤)
+      sizes: ['120', '150', '180', '210'],
+      colors: [{ name: 'twotone', label: '투톤',   swatch: { kind: 'gradient', from: '#4a5d23', to: 'rgb(192, 207, 194)' }, sceneColor: '#4a5d23' }],
+    },
+    3: { // 더퍼스트 트리 (전구 일체형, no color choice)
       sizes: ['180', '210'],
-      colors: [
-        { name: 'none', label: '없음', swatch: { kind: 'none' }, sceneColor: '#4a5d23' },
-      ],
+      colors: [{ name: 'none',    label: '없음',   swatch: { kind: 'none' }, sceneColor: '#4a5d23' }],
     },
-    3: { // 스케치 트리(올리브/스노우)
+    4: { // 스케치 트리(올리브)
       sizes: ['120', '150', '180', '210'],
-      colors: [
-        { name: 'olive', label: '올리브', swatch: { kind: 'solid', color: '#4a5d23' }, sceneColor: '#4a5d23' },
-        { name: 'snow',  label: '스노우', swatch: { kind: 'solid', color: '#f0f0f0' }, sceneColor: '#f0f0f0' },
-      ],
+      colors: [{ name: 'olive',   label: '올리브', swatch: { kind: 'solid', color: '#4a5d23' }, sceneColor: '#4a5d23' }],
     },
-    4: { // 스케치 트리(핑크/로즈)
+    5: { // 스케치 트리(스노우) — v3 olive base + #f0f0f0 tint
+      sizes: ['120', '150', '180', '210'],
+      colors: [{ name: 'snow',    label: '스노우', swatch: { kind: 'solid', color: '#f0f0f0' }, sceneColor: '#f0f0f0' }],
+    },
+    6: { // 스케치 트리(로즈) — v3 olive base + rose tint
       sizes: ['150', '180', '210'],
-      colors: [
-        { name: 'pink', label: '핑크', swatch: { kind: 'solid', color: '#f7d4da' }, sceneColor: '#f7d4da' },
-        { name: 'rose', label: '로즈', swatch: { kind: 'solid', color: '#d10050' }, sceneColor: '#d10050' },
-      ],
+      colors: [{ name: 'rose',    label: '로즈',   swatch: { kind: 'solid', color: '#d10050' }, sceneColor: '#d10050' }],
+    },
+    7: { // 스케치 트리(핑크) — v3 olive base + pink tint
+      sizes: ['150', '180', '210'],
+      colors: [{ name: 'pink',    label: '핑크',   swatch: { kind: 'solid', color: '#f7d4da' }, sceneColor: '#f7d4da' }],
     },
   };
 
@@ -741,11 +769,9 @@ export default function App() {
     if (currentPage === 1) {
       if (!selectedTree) return;
       const treePath = resolveTreeModel(selectedTree, selectedSize, selectedColor);
-      const colorObj = treeOptionsMap[selectedTree]?.colors.find(c => c.name === selectedColor);
-      const colorLabel = colorObj?.label || selectedColor;
       const baseName = treeNames[selectedTree] || `Tree ${selectedTree}`;
-      // Skip color suffix when the tree has no real color choice (selectedColor === 'none')
-      const nameTail = selectedColor === 'none' ? selectedSize : `${selectedSize} ${colorLabel}`;
+      // Each slot is a single (tree × color) combo now — baseName already contains the
+      // color (e.g. "피시본 트리(그린)"), so we no longer append a color suffix. Just size.
       candidate = {
         uid: nextUid(),
         kind: 'tree',
@@ -753,7 +779,7 @@ export default function App() {
         treePath,
         size: selectedSize,
         color: selectedColor,
-        name: `${baseName} ${nameTail}`,
+        name: `${baseName} ${selectedSize}`,
         thumbnail: treeThumbnails[selectedTree] || '',
         qty: 1,
       };
@@ -851,38 +877,51 @@ export default function App() {
   // Tree model resolution: specific (tree × size × color) variant first, then per-tree default,
   // then a global hard fallback. As real product variants are authored, drop them into treeVariantModels;
   // unmapped combos quietly fall back to the tree's default model so the UI never blanks out.
+  // Slots 1,2,3,4 have direct authored variants → `treeColor` opt-out preserves materials.
+  // Slots 5 (스노우), 6 (로즈), 7 (핑크) have NO entries here → fall through to
+  // treeSizeFallbackModels which points at v3 olive geometry; treeColor tint is then applied.
   const treeVariantModels: Record<string, string> = {
-    '1-120cm-olive': '/models/trees/fishboneTree_green120.glb',
-    '1-120cm-mix':   '/models/trees/fishboneTree_twotone120.glb',
-    '1-150cm-olive': '/models/trees/fishboneTree_green150.glb',
-    '1-150cm-mix':   '/models/trees/fishboneTree_twotone150.glb',
-    '1-180cm-olive': '/models/trees/fishboneTree_green180.glb',
-    '1-180cm-mix':   '/models/trees/fishboneTree_twotone180.glb',
-    '1-210cm-olive': '/models/trees/fishboneTree_green210.glb',
-    '1-210cm-mix':   '/models/trees/fishboneTree_twotone210.glb',
-    '2-180cm-none':  '/models/trees/theFirstTree_test_v4.glb',
-    '2-210cm-none':  '/models/trees/theFirstTree_210.glb',
-    '3-120cm-olive': '/models/trees/sketchTree_v3_olive120.glb',
-    '3-120cm-snow':  '/models/trees/sketchTree_white120.glb',
-    '3-150cm-olive': '/models/trees/sketchTree_v3_olive150.glb',
-    '3-180cm-olive': '/models/trees/sketchTree_v3_olive180.glb',
-    '3-180cm-snow':  '/models/trees/sketchTree_white180.glb',
-    '3-210cm-olive': '/models/trees/sketchTree_v3_olive210.glb',
+    '1-120cm-green':   '/models/trees/fishboneTree_green120.glb',
+    '1-150cm-green':   '/models/trees/fishboneTree_green150.glb',
+    '1-180cm-green':   '/models/trees/fishboneTree_green180.glb',
+    '1-210cm-green':   '/models/trees/fishboneTree_green210.glb',
+    '2-120cm-twotone': '/models/trees/fishboneTree_twotone120.glb',
+    '2-150cm-twotone': '/models/trees/fishboneTree_twotone150.glb',
+    '2-180cm-twotone': '/models/trees/fishboneTree_twotone180.glb',
+    '2-210cm-twotone': '/models/trees/fishboneTree_twotone210.glb',
+    '3-180cm-none':    '/models/trees/theFirstTree_test_v4.glb',
+    '3-210cm-none':    '/models/trees/theFirstTree_210.glb',
+    '4-120cm-olive':   '/models/trees/sketchTree_v3_olive120.glb',
+    '4-150cm-olive':   '/models/trees/sketchTree_v3_olive150.glb',
+    '4-180cm-olive':   '/models/trees/sketchTree_v3_olive180.glb',
+    '4-210cm-olive':   '/models/trees/sketchTree_v3_olive210.glb',
   };
   // Per-(tree, size) shared fallback — used when no color-specific variant exists but the tree
-  // wants to swap the base model by size. Tree 4 (스케치 핑크/로즈) reuses sketchTree olive GLBs
-  // at the right size, then the treeColor tint (#ffc0cb / #c64073) gets applied on top to
-  // differentiate pink vs rose visually.
+  // wants to swap the base model by size. Tint variants (snow/rose/pink) reuse the v3 olive
+  // GLBs at the right size, then treeColor tint gets applied on top.
   const treeSizeFallbackModels: Record<string, string> = {
-    '4-150cm': '/models/trees/sketchTree_v3_olive150.glb',
-    '4-180cm': '/models/trees/sketchTree_v3_olive180.glb',
-    '4-210cm': '/models/trees/sketchTree_v3_olive210.glb',
+    // 스케치(스노우) — all sizes on v3 olive base + #f0f0f0 tint
+    '5-120cm': '/models/trees/sketchTree_v3_olive120.glb',
+    '5-150cm': '/models/trees/sketchTree_v3_olive150.glb',
+    '5-180cm': '/models/trees/sketchTree_v3_olive180.glb',
+    '5-210cm': '/models/trees/sketchTree_v3_olive210.glb',
+    // 스케치(로즈) — 150/180/210 on v3 olive base + rose tint
+    '6-150cm': '/models/trees/sketchTree_v3_olive150.glb',
+    '6-180cm': '/models/trees/sketchTree_v3_olive180.glb',
+    '6-210cm': '/models/trees/sketchTree_v3_olive210.glb',
+    // 스케치(핑크) — 150/180/210 on v3 olive base + pink tint
+    '7-150cm': '/models/trees/sketchTree_v3_olive150.glb',
+    '7-180cm': '/models/trees/sketchTree_v3_olive180.glb',
+    '7-210cm': '/models/trees/sketchTree_v3_olive210.glb',
   };
   const treeDefaultModel: Record<number, string> = {
     1: '/models/trees/fishboneTree_green150.glb',
-    2: '/models/trees/fishboneTree_green150.glb', // placeholder until 더퍼스트 트리 model arrives
-    3: '/models/trees/sketchTree_v3_olive150.glb',
-    4: '/models/trees/sketchTree_v3_olive150.glb',   // global fallback if size-specific entry missing
+    2: '/models/trees/fishboneTree_twotone150.glb',
+    3: '/models/trees/theFirstTree_test_v4.glb',
+    4: '/models/trees/sketchTree_v3_olive150.glb',
+    5: '/models/trees/sketchTree_v3_olive150.glb',
+    6: '/models/trees/sketchTree_v3_olive150.glb',
+    7: '/models/trees/sketchTree_v3_olive150.glb',
   };
   const resolveTreeModel = (treeId: number, size: string, color: string): string => {
     return treeVariantModels[`${treeId}-${size}-${color}`]
@@ -892,17 +931,23 @@ export default function App() {
   };
 
   const treeNames: Record<number, string> = {
-    1: '피시본 트리',
-    2: '더퍼스트 트리',
-    3: '스케치 트리(올리브/스노우)',
-    4: '스케치 트리(로즈/핑크)',
+    1: '피시본 트리(그린)',
+    2: '피시본 트리(투톤)',
+    3: '더퍼스트 트리',
+    4: '스케치 트리(올리브)',
+    5: '스케치 트리(스노우)',
+    6: '스케치 트리(로즈)',
+    7: '스케치 트리(핑크)',
   };
 
   const treeThumbnails: Record<number, string> = {
     1: '/thumbnails/tree/피시본 트리 그린 120 ~180cm.jpg',
-    2: '/thumbnails/tree/최고급 PE100 전구 일체형 더퍼스트트리.jpg',
-    3: '/thumbnails/tree/스케치 트리 올리브 120 ~ 210cm.jpg',
-    4: '/thumbnails/tree/스케치 트리 로즈 150 ~ 210cm.jpg',
+    2: '/thumbnails/tree/피시본 트리 투톤 120 ~ 210cm.jpg',
+    3: '/thumbnails/tree/최고급 PE100 전구 일체형 더퍼스트트리.jpg',
+    4: '/thumbnails/tree/스케치 트리 올리브 120 ~ 210cm.jpg',
+    5: '/thumbnails/tree/스케치 트리 스노우 120 ~ 210cm.jpg',
+    6: '/thumbnails/tree/스케치 트리 로즈 150 ~ 210cm.jpg',
+    7: '/thumbnails/tree/스케치 트리 핑크 150 ~ 210cm.jpg',
   };
 
   const ornamentNames: Record<number, string> = {
@@ -934,17 +979,11 @@ export default function App() {
   };
 
   const pointOrnamentNames: Record<number, string> = {
-    1: '리치알빈',
-    2: '코크베어',
-    3: '브라더스 루돌프',
-    4: '브라더스 산타',
+    1: '오로라 리본',
   };
 
   const pointOrnamentThumbnails: Record<number, string> = {
-    1: '/thumbnails/point/alvin_point_thumbnail.jpg',
-    2: '/thumbnails/point/cokebear_point_thumbnail.jpg',
-    3: '/thumbnails/point/rudolf_point_thumbnail.jpg',
-    4: '/thumbnails/point/santa_point_thumbnail.jpg',
+    1: '/thumbnails/point/aurora_ribbon.png',
   };
 
   // ---- Scene layer derivation (cart + preview) ----
@@ -964,7 +1003,7 @@ export default function App() {
     // 더퍼스트 — 전구 일체형 (built-in baked lights). Cart never gets add-on light rows for
     // this tree (Page 2 modal blocks purchase). Instead, we inject a synthetic layer with
     // the size-specific baked count so the scatter effect renders the built-in lights.
-    if (selectedTree === 2) {
+    if (selectedTree === 3) {
       const builtIn = DEPERSE_BUILTIN_BULB_COUNT[selectedSize];
       if (!builtIn) return [];
       return [{
@@ -1018,19 +1057,21 @@ export default function App() {
   // pipeline. Overflow-to-storage (Q15) is the follow-up in the ornament placement rewrite.
   const scaledOrnamentConfig = useMemo(() => {
     const combined = new Map<string, number>();
-    const addLayer = (ornamentId: number, layerQty: number) => {
-      const set = ORNAMENT_SETS[ornamentId];
+    const addLayer = (sets: Record<number, OrnamentSet>, id: number, layerQty: number) => {
+      const set = sets[id];
       if (!set || layerQty <= 0) return;
       for (const entry of set) {
         combined.set(entry.path, (combined.get(entry.path) || 0) + entry.qty * layerQty);
       }
     };
     cartItems.forEach(it => {
-      if (it.kind === 'ornament') addLayer(it.ornamentId, it.qty);
+      if (it.kind === 'ornament') addLayer(ORNAMENT_SETS, it.ornamentId, it.qty);
+      else if (it.kind === 'point') addLayer(POINT_ORNAMENT_SETS, it.pointId, it.qty);
     });
-    if (selectedOrnament > 0) addLayer(selectedOrnament, ornamentQty);
+    if (selectedOrnament > 0) addLayer(ORNAMENT_SETS, selectedOrnament, ornamentQty);
+    if (selectedPointOrnament > 0) addLayer(POINT_ORNAMENT_SETS, selectedPointOrnament, pointOrnamentQty);
     return Array.from(combined.entries()).map(([path, qty]) => ({ path, qty }));
-  }, [cartItems, selectedOrnament, ornamentQty]);
+  }, [cartItems, selectedOrnament, ornamentQty, selectedPointOrnament, pointOrnamentQty]);
 
   const pageTitles = [
     "1. 트리를 선택하세요.",
@@ -1061,7 +1102,7 @@ export default function App() {
                   : (treeOptionsMap[selectedTree]?.colors.find(c => c.name === selectedColor)?.sceneColor || '#2d5a27')
               }
               lightMode={lightMode}
-              clusterGlbPath={getClusterGlbPath(selectedTree, selectedSize)}
+              clusterGlbPath={getClusterGlbPath(selectedTree, selectedSize, lightWrapMode)}
               ornamentConfig={scaledOrnamentConfig}
               rearrangeMode={rearrangeMode || adminPlacementMode}
               hdriPath="/models/hdri/brown_photostudio_02_1k.exr"
@@ -1706,8 +1747,8 @@ export default function App() {
                    {/* Scrollable: Tree Selector */}
                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                      <div className="grid grid-cols-2 gap-3">
-                       {[1, 2, 3, 4].map((i) => (
-                         <button 
+                       {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+                         <button
                            key={i}
                            onClick={() => setSelectedTree(i)}
                            className={`group relative flex flex-col rounded-xl overflow-hidden transition-all shadow-sm border-2 ${selectedTree === i ? 'border-blue-500 bg-blue-500' : 'border-transparent bg-white'}`}
@@ -1741,44 +1782,9 @@ export default function App() {
 
                    {/* Fixed Bottom Section: Colors, Sizes, Buttons */}
                    <div className="shrink-0 p-4 bg-gray-50/50 flex flex-col gap-5">
-                     
-                     {/* Color Selector — per-tree options */}
-                     <div className="space-y-2.5">
-                       <h4 className="text-sm font-bold text-slate-600 flex items-center gap-1.5">
-                         <Palette className="size-4" /> 컬러 선택
-                       </h4>
-                       <div className="grid grid-cols-2 gap-2">
-                          {(treeOptionsMap[selectedTree]?.colors ?? []).map((color) => {
-                            const isSelected = selectedColor === color.name;
-                            const isNone = color.swatch.kind === 'none';
-                            const swatchStyle =
-                              color.swatch.kind === 'gradient'
-                                ? { background: `linear-gradient(to right, ${color.swatch.from} 50%, ${color.swatch.to} 50%)` }
-                                : color.swatch.kind === 'solid'
-                                  ? { backgroundColor: color.swatch.color }
-                                  : { backgroundColor: '#cbd5e1' }; // slate-300 for "없음"
-                            return (
-                              <button
-                                key={color.name}
-                                onClick={() => setSelectedColor(color.name)}
-                                className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group ${
-                                  isNone
-                                    ? 'bg-slate-100 border-2 border-slate-200'
-                                    : 'bg-white ' + (isSelected
-                                      ? 'border-2 border-blue-500 shadow-sm'
-                                      : 'border-2 border-slate-200 hover:border-slate-300')
-                                }`}
-                              >
-                                <div className="w-8 h-8 rounded-full" style={swatchStyle}></div>
-                                <div className="text-left flex-1">
-                                  <div className={`text-sm font-semibold ${isNone ? 'text-slate-400' : 'text-slate-800'}`}>{color.label}</div>
-                                </div>
-                                {isSelected && !isNone && <Check className="size-4 text-blue-500" />}
-                              </button>
-                            );
-                          })}
-                       </div>
-                     </div>
+
+                     {/* Color selector removed — each tree slot now pins one color, so the
+                         color is implicit in the slot chosen from the grid above. */}
 
                      {/* Size Selector — per-tree options */}
                      <div className="space-y-2.5">
@@ -1869,7 +1875,7 @@ export default function App() {
                            key={i}
                            onClick={() => {
                              // 더퍼스트 (전구 일체형) — block any light selection and surface modal
-                             if (selectedTree === 2) { setShowDeperseAlert(true); return; }
+                             if (selectedTree === 3) { setShowDeperseAlert(true); return; }
                              setSelectedLight(prev => prev === i + 1 ? 0 : i + 1);
                            }}
                            className={`group relative flex flex-col rounded-xl overflow-hidden transition-all shadow-sm border-2 ${selectedLight === i + 1 ? 'border-blue-500 bg-blue-500' : 'border-transparent bg-white'}`}
@@ -1921,7 +1927,7 @@ export default function App() {
                          const family = selectedLight > 0 ? LIGHT_FAMILY[selectedLight] : null;
                          // Non-front options vary by family. Default (no light selected) = wire layout.
                          const non360: Array<{ key: WrapKey; label: string; icon: any }> =
-                           family === 'led' || family === 'cluster'
+                           family === 'led'
                              ? [{ key: '360', label: '360도', icon: LayoutGrid }]
                              : [
                                  { key: '360', label: '360도', icon: LayoutGrid },
@@ -2203,8 +2209,8 @@ export default function App() {
                    {/* Scrollable: Point Ornament Selector */}
                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                      <div className="grid grid-cols-2 gap-3">
-                       {[1, 2, 3, 4].map((i) => (
-                         <button 
+                       {[1].map((i) => (
+                         <button
                            key={i}
                            onClick={() => setSelectedPointOrnament(prev => prev === i ? 0 : i)}
                            className={`group relative flex flex-col rounded-xl overflow-hidden transition-all shadow-sm border-2 ${selectedPointOrnament === i ? 'border-blue-500 bg-blue-500' : 'border-transparent bg-white'}`}

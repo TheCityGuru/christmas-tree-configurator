@@ -1785,6 +1785,18 @@ export default function Scene({
           .catch(() => null)
       : Promise.resolve(null);
 
+    // Percentage-based progress bar for ornament loads — show only when there's actual
+    // work to do (skip when every path is a cache hit). Increment on each individual load
+    // completion so the bar advances smoothly across many GLBs.
+    const uncachedCount = uniquePaths.reduce(
+      (n, p) => n + (ornamentCacheRef.current.has(p) ? 0 : 1),
+      0,
+    );
+    let completedLoads = 0;
+    if (uncachedCount > 0) {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      setLoadProgress(0);
+    }
     const loadPromises = uniquePaths.map((path) => {
       if (ornamentCacheRef.current.has(path)) {
         return Promise.resolve(ornamentCacheRef.current.get(path)!);
@@ -1794,6 +1806,10 @@ export default function Scene({
           path,
           (gltf) => {
             ornamentCacheRef.current.set(path, gltf.scene);
+            completedLoads++;
+            if (uncachedCount > 0) {
+              setLoadProgress(Math.round((completedLoads / uncachedCount) * 100));
+            }
             resolve(gltf.scene);
           },
           undefined,
@@ -2045,6 +2061,13 @@ export default function Scene({
         // Store a dummy object reference for compatibility; rearrange will use registry
         rState.beaconOrnamentMap.set(key, new THREE.Object3D());
       });
+
+      // Ornament pipeline finished — clear the progress bar (same 400ms fade the tree
+      // loader uses so the bar has time to visibly hit 100% before dismissing).
+      if (uncachedCount > 0) {
+        setLoadProgress(100);
+        fadeTimerRef.current = setTimeout(() => setLoadProgress(null), 400);
+      }
     });
   }, [ornamentConfig, treeReady, placementPresetPath, frontOnly]);
 
@@ -2105,32 +2128,25 @@ export default function Scene({
       });
     };
 
-    /** Create a temporary highlighted clone from source model cache */
+    /** Create a temporary highlighted clone from source model cache.
+     *  Always swaps to a silver+blue-emissive material — regardless of the ornament's
+     *  authored PBR. Rationale: authored MeshPhysicalMaterial with clearcoat / transmission
+     *  / sheen / dense base-color maps visually dominates a 0.6-intensity emissive tint,
+     *  so the blue-glow pick indicator was invisible on non-angelina ornaments. The
+     *  highlight is a transient pick-state marker — matching the authored shading isn't
+     *  the goal; being unambiguous is. */
     const createHighlightClone = (record: OrnamentRecord): THREE.Group | null => {
       const srcModel = ornamentCacheRef.current.get(record.ornamentPath);
       if (!srcModel || !model) return null;
-
-      const keepOriginal = (record.ornamentPath.includes('/ornaments/') && !record.ornamentPath.includes('/ornaments/angelina/'))
-        || record.ornamentPath.includes('ribon_custom_material')
-        || record.ornamentPath.includes('Silver_Ornament_Ball_')
-        || record.ornamentPath.endsWith('/ornaments/angelina/bead.glb');
 
       const clone = srcModel.clone(true);
       clone.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
           const mesh = child as THREE.Mesh;
-          let mat: THREE.Material;
-          if (keepOriginal) {
-            mat = (mesh.material as THREE.Material).clone();
-          } else {
-            const hasUVs = !!mesh.geometry?.attributes?.uv;
-            mat = createSilverMaterial(hasUVs);
-          }
-          const stdMat = mat as THREE.MeshStandardMaterial;
-          if (stdMat.isMeshStandardMaterial) {
-            stdMat.emissive = new THREE.Color(0x00ccff);
-            stdMat.emissiveIntensity = 0.6;
-          }
+          const hasUVs = !!mesh.geometry?.attributes?.uv;
+          const mat = createSilverMaterial(hasUVs);
+          mat.emissive = new THREE.Color(0x00ccff);
+          mat.emissiveIntensity = 0.6;
           mesh.material = mat;
         }
       });
