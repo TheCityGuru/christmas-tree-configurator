@@ -95,6 +95,10 @@ interface SceneProps {
   hdriPath?: string;
   /** Path to a static ornament GLB (e.g. bead_string) — loaded at model origin, not movable */
   beadStringPath?: string;
+  /** Path to a cluster-light GLB for the current (tree × size). When set AND a `cluster`
+   *  light layer (lightId=4) is active, this GLB is loaded onto the tree INSTEAD of the
+   *  code-generated bulb scatter for that layer. Other layers still scatter normally. */
+  clusterGlbPath?: string;
   /** Path to a placement preset JSON (admin-saved default positions) */
   placementPresetPath?: string;
   /** Ref for imperative storage actions (store/retrieve ornaments) */
@@ -416,6 +420,7 @@ export default function Scene({
   rearrangeMode = false,
   hdriPath = '/models/hdri/brown_photostudio_02_1k.exr',
   beadStringPath,
+  clusterGlbPath,
   placementPresetPath,
   actionsRef,
   onStorageChange,
@@ -431,6 +436,9 @@ export default function Scene({
   const loadedModelRef = useRef<THREE.Group | null>(null);
   /** Two emissive-bulb groups (A and B) for alternating blink. */
   const treeLightGroupsRef = useRef<THREE.InstancedMesh[]>([]);
+  /** Loaded cluster-light GLB, when a per-(tree × size) variant is wired via clusterGlbPath.
+   *  Held here so it can be disposed and detached on lightLayers / tree change. */
+  const clusterModelRef = useRef<THREE.Group | null>(null);
   /** Active blink interval (cleared on rerun / unmount). */
   const blinkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** World-space AABB of the loaded env.glb — used to clamp camera inside the room. */
@@ -523,7 +531,9 @@ export default function Scene({
     // non-light emissiveIntensity during the bloom render only (see animate() below).
     const BLOOM_STRENGTH_LIGHTS = 0.3;
     const BLOOM_STRENGTH_OTHER = 0.0;
+    const BLOOM_STRENGTH_CLUSTER = BLOOM_STRENGTH_LIGHTS + 0.2; // 0.5 — cluster-GLB spirals
     const OTHER_EMISSIVE_SCALE = BLOOM_STRENGTH_OTHER / BLOOM_STRENGTH_LIGHTS;
+    const CLUSTER_EMISSIVE_SCALE = BLOOM_STRENGTH_CLUSTER / BLOOM_STRENGTH_LIGHTS;
     const bloomRT = new THREE.WebGLRenderTarget(
       container.clientWidth,
       container.clientHeight,
@@ -695,12 +705,29 @@ export default function Scene({
       scene.traverse((obj) => {
         if ((obj as THREE.Mesh).isMesh) {
           const mesh = obj as THREE.Mesh;
+          // `userData.isTreeLight` is the AUTHORITATIVE bloom gate. It's set by the scatter
+          // effect on procedural InstancedMesh bulbs AND by the cluster-GLB loader on the
+          // authored Spiral meshes. Tagged meshes ALWAYS contribute to bloom at full
+          // BLOOM_STRENGTH_LIGHTS, no material introspection needed — this handles cases
+          // where authored PBR materials (MeshPhysicalMaterial via KHR_* extensions) might
+          // fail the isMeshStandardMaterial check depending on Three.js internals.
+          if (mesh.userData?.isTreeLight) {
+            // Cluster-light spirals bloom stronger than scatter bulbs — boost their
+            // emissiveIntensity during the bloom render only. Restored right after.
+            if (mesh.userData?.isClusterLight) {
+              const mat = mesh.material as THREE.MeshStandardMaterial;
+              if (mat?.isMeshStandardMaterial && !emissiveIntensityCache.has(mat)) {
+                emissiveIntensityCache.set(mat, mat.emissiveIntensity);
+                mat.emissiveIntensity *= CLUSTER_EMISSIVE_SCALE;
+              }
+            }
+            return; // keep material for bloom (at full or boosted intensity)
+          }
           const mat = mesh.material as THREE.MeshStandardMaterial;
           if (mat.isMeshStandardMaterial && mat.emissiveIntensity > 0 && mat.emissive && mat.emissive.getHSL({ h: 0, s: 0, l: 0 }).l > 0) {
-            // Emissive — keep for bloom. Tree-light InstancedMeshes are tagged with
-            // userData.isTreeLight during scatter; anything else emissive (e.g. ornaments
-            // with authored emissive) gets its intensity scaled down so it blooms less.
-            if (!mesh.userData?.isTreeLight && !emissiveIntensityCache.has(mat)) {
+            // Emissive but NOT a tree light (e.g., ornaments with authored emissive) —
+            // scale intensity down so it blooms at BLOOM_STRENGTH_OTHER.
+            if (!emissiveIntensityCache.has(mat)) {
               emissiveIntensityCache.set(mat, mat.emissiveIntensity);
               mat.emissiveIntensity *= OTHER_EMISSIVE_SCALE;
             }
@@ -1259,7 +1286,13 @@ export default function Scene({
     // strategy since `foliage.NNN` nodes carry the visible needle meshes.
     const isTheFirstTree = treeModelPath?.includes('theFirstTree') ?? false;
     if (!treeModelPath || (!isUltimate && !isSketch && !isTheFirstTree)) return;
-    const renderableLayers = lightLayers.filter((l) => l.bulbCount > 0);
+    // 클러스터 (lightId=4) uses a per-tree authored GLB when clusterGlbPath is set — see
+    // the cluster-load useEffect below. Those layers are rendered by GLB, not scatter, so
+    // exclude them here to avoid double-render. When no GLB variant exists for this tree,
+    // cluster layers fall through the scatter code path as the code-generated fallback.
+    const renderableLayers = lightLayers
+      .filter((l) => l.bulbCount > 0)
+      .filter((l) => !(l.lightId === 4 && clusterGlbPath));
     if (renderableLayers.length === 0) return;
     // Aggregate count drives the global oversample/safety budget (clusters/PER_BRANCH math).
     const totalLightCount = renderableLayers.reduce((s, l) => s + l.bulbCount, 0);
@@ -1529,7 +1562,81 @@ export default function Scene({
         });
       });
     });
-  }, [treeReady, treeModelPath, lightLayers, frontOnly]);
+  }, [treeReady, treeModelPath, lightLayers, frontOnly, clusterGlbPath]);
+
+  // ---- Cluster light: full-authored GLB per (tree × size) ----
+  // Loaded when the current lightLayers include a cluster layer (lightId=4) AND a matching
+  // GLB path was resolved by App.tsx. The GLB is authored with two InstancedMesh nodes named
+  // `Spiral.0` / `Spiral.1` (each 2148 GN instances). We tag them as blink groups A / B and
+  // push them into `treeLightGroupsRef` so the existing ON / 점멸모드 / OFF handler drives
+  // their `emissiveIntensity` for free.
+  useEffect(() => {
+    const treeGroup = treeGroupRef.current;
+    // Cleanup: remove any previously-loaded cluster group first (fires on every rerun).
+    const prior = clusterModelRef.current;
+    if (prior) {
+      // Also pull its meshes out of treeLightGroupsRef so the lightMode toggle no longer
+      // tries to drive them.
+      treeLightGroupsRef.current = treeLightGroupsRef.current.filter((m) => {
+        let p: THREE.Object3D | null = m;
+        while (p) { if (p === prior) return false; p = p.parent; }
+        return true;
+      });
+      disposeGroup(prior);
+      treeGroup.remove(prior);
+      clusterModelRef.current = null;
+    }
+
+    const hasClusterLayer = lightLayers.some((l) => l.lightId === 4);
+    if (!hasClusterLayer || !clusterGlbPath) return;
+
+    let cancelled = false;
+    gltfLoader.load(clusterGlbPath, (gltf) => {
+      if (cancelled) { disposeGroup(gltf.scene); return; }
+      const clusterModel = gltf.scene;
+      clusterModel.name = 'clusterLight';
+
+      // Find the two Spiral instanced meshes and tag them A / B. GLTFLoader may preserve
+      // or strip the dot (`Spiral.0` vs `Spiral0`), so match by regex on the trailing digit.
+      const spiralAB: THREE.Mesh[] = [];
+      clusterModel.traverse((child) => {
+        if (!(child as THREE.Mesh).isMesh) return;
+        if (/^Spiral[._]?\d+$/.test(child.name)) spiralAB.push(child as THREE.Mesh);
+      });
+      // Runtime emissive override: authored Material.010 ships as amber-orange
+      // (emissiveFactor [1.0, 0.615, 0.0]) — override to the same warm-white cream the
+      // scatter lights use so cluster + scatter light look consistent, per user request
+      // ("fainter yellow").
+      const CLUSTER_EMISSIVE_COLOR = new THREE.Color('#fff5cc');
+      spiralAB.forEach((mesh, i) => {
+        // First → A, second → B. If there's only one, both blink halves point at it — the
+        // toggle will treat it as A-only, still functional (won't blink but always on).
+        mesh.userData.blinkGroup = i === 0 ? 'A' : 'B';
+        mesh.userData.isTreeLight = true;
+        mesh.userData.isClusterLight = true; // bloom pass boosts these +0.2 above scatter
+        // Clone the material per mesh so A/B blink can drive emissiveIntensity independently.
+        // Original Material.010 is shared across Spiral.0 and Spiral.1, so without cloning
+        // setting intensity on one would flash both.
+        const src = mesh.material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
+        if (Array.isArray(src)) {
+          mesh.material = src.map((m) => {
+            const c = m.clone();
+            if ((c as THREE.MeshStandardMaterial).emissive) (c as THREE.MeshStandardMaterial).emissive.copy(CLUSTER_EMISSIVE_COLOR);
+            return c;
+          });
+        } else {
+          const c = src.clone();
+          if (c.emissive) c.emissive.copy(CLUSTER_EMISSIVE_COLOR);
+          mesh.material = c;
+        }
+        treeLightGroupsRef.current.push(mesh as unknown as THREE.InstancedMesh);
+      });
+
+      treeGroup.add(clusterModel);
+      clusterModelRef.current = clusterModel;
+    });
+    return () => { cancelled = true; };
+  }, [treeReady, clusterGlbPath, lightLayers]);
 
   // ---- Update tree color on foliage materials ----
   // Uses the load-time `userData.isFoliage` tag (set during tree load) instead of a hue gate.

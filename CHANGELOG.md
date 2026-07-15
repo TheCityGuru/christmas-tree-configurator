@@ -6,6 +6,53 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-16 — 클러스터 GLB architecture, 스케치 v3 fleet complete, 파스텔팝 punch-up
+
+### 클러스터 (cluster) light — full-authored GLB per (tree × size) instead of scatter
+
+- Client-provided GLB (`public/models/light/cluster_light_sketch150.glb`, 29 MB) wired to Tree 3 × 150cm × 클러스터 as the visual layer. Other tree × size combos still fall back to the code-generated bulb scatter until their GLBs are authored.
+- **App.tsx**: new `CLUSTER_LIGHT_VARIANTS` map + `getClusterGlbPath(treeId, size)` helper; passes `clusterGlbPath` prop into `<Scene>`.
+- **Scene.tsx**: new `clusterGlbPath?: string` prop; new `clusterModelRef`; new cluster-load useEffect with the exact same disposal/reload lifecycle as the tree-load. Scatter effect now filters out any `lightId === 4` layer when `clusterGlbPath` is set to avoid double-render. When the GLB variant is missing, cluster layers fall through the scatter code path as the fallback.
+
+### Cluster GLB internals — Spiral A/B blink + emissive override + material cloning
+
+- GLB structure per inspector: two `EXT_mesh_gpu_instancing` nodes `Spiral.0` and `Spiral.1`, each with 2148 GN-authored instances. Two spirals map perfectly to the existing A/B blink infrastructure.
+- **Blink integration**: cluster-load tags first spiral `blinkGroup: 'A'`, second `'B'`, both `isTreeLight: true`, then pushes into `treeLightGroupsRef`. The existing `setBlinkGroupLit()` handler in the lightMode toggle effect drives their `emissiveIntensity` between 13 (ON) and 0 (OFF) for free — 점멸모드 alternates the two spirals like it does the scatter A/B groups.
+- **Material cloning per mesh**: the GLB ships one shared `Material.010` referenced by both Spiral meshes. Without cloning, `setBlinkGroupLit` would flash both together. Cluster-load now clones the material for each Spiral so blink can drive them independently.
+- **Runtime emissive color override**: authored `Material.010` is amber-orange (`emissiveFactor [1.0, 0.615, 0.0]` = `#ff9d00`, `emissiveStrength: 20` via `KHR_materials_emissive_strength`). Per user request ("fainter yellow"), the override sets emissive to `#fff5cc` (the same warm-white the scatter lights use) so cluster + scatter halos read consistently.
+
+### Bloom pipeline — `isTreeLight` tag is now the authoritative gate; new `isClusterLight` tier
+
+- Old bloom pass introspected `mat.isMeshStandardMaterial && mat.emissiveIntensity > 0 && ...` to decide "keep for bloom." That risked missing authored PBR materials via `KHR_*` extensions (the cluster GLB in particular). Refactored so `mesh.userData.isTreeLight === true` is checked FIRST and returns early — tagged meshes bloom at `BLOOM_STRENGTH_LIGHTS` regardless of material introspection.
+- **New third tier**: `BLOOM_STRENGTH_CLUSTER = BLOOM_STRENGTH_LIGHTS + 0.2 = 0.5`. Cluster spirals additionally carry `userData.isClusterLight`. During the bloom render only, their `emissiveIntensity` is temporarily multiplied by `CLUSTER_EMISSIVE_SCALE = 0.5 / 0.3 = 1.667` (reuses the existing `emissiveIntensityCache` restore loop). Non-cluster tree lights unchanged.
+- Bloom tier summary now:
+  - Cluster GLB spirals — effective 0.5 (via +67% intensity boost during bloom pass)
+  - Scatter tree bulbs — 0.3 (baseline)
+  - Everything else emissive — 0.0 (scaled to zero for bloom pass)
+- Diagnostic: `scripts/inspect_glb.mjs` extended with a `--- Materials ---` section that shows `emissiveFactor` / `emissiveStrength` / extensions per material — used to locate `Material.010` and confirm the emission strength/color values before writing the override.
+
+### 파스텔팝 palette punch-up
+
+- Accent colors bumped for saturation because high emissive intensity + bloom pushes hues toward white, and the old pastels were reading as near-uniform in-scene.
+- `#ff9a3d → #ff6a1a` (orange), `#7fcc7f → #31d151` (green), `#b48dd6 → #b350f0` (purple).
+- Warm-white slots and 6-cycle structure (3 warm + 1 each accent) unchanged.
+
+### 스케치 트리 (Tree 3) — all olive sizes now on v3 geometry
+
+- Added 4 new authored variants: `sketchTree_v3_olive{120,150,180,210}.glb`.
+- `treeVariantModels` entries updated for `3-{120,150,180,210}cm-olive`. Each is a one-line swap; everything else (quadrant instancing via `sketchBranch|branch` regex, PVC-excluded recenter, light scatter, treeColor opt-out) auto-applies via the existing `sketchTree` substring gates.
+- **Tint-base fallbacks also swapped to v3** — `treeSizeFallbackModels['4-{150,180,210}cm']` (Tree 4 pink/rose uses these as base geometry with a runtime `treeColor` tint applied) and `treeDefaultModel[3]` / `treeDefaultModel[4]` all now point at v3. So Tree 4 pink/rose × any size AND Tree 3 스노우 fallbacks (150 & 210) also render on v3 geometry with their respective color tints.
+- **Every legacy `sketchTree_olive*.glb` is now truly unreferenced** — safe to delete when you want a cleanup pass. `sketchTree_white120.glb` and `sketchTree_white180.glb` are still authored real GLBs and still wired.
+
+### Files
+- `src/app/App.tsx` — `CLUSTER_LIGHT_VARIANTS` + `getClusterGlbPath`; passes `clusterGlbPath` prop; 파스텔팝 accent hex bumps; 4 sketchTree v3 variant swaps + 5 fallback-base v3 swaps.
+- `src/app/components/Scene.tsx` — `clusterGlbPath` prop + destructure; `clusterModelRef`; cluster-load useEffect (dispose/reload lifecycle, blink group tagging, per-mesh material clone, emissive override); scatter filter for cluster layers when GLB is set; bloom pass refactor with `isTreeLight` as primary gate + `BLOOM_STRENGTH_CLUSTER` / `isClusterLight` tier.
+- `scripts/inspect_glb.mjs` — new `--- Materials ---` section showing emissive properties.
+- `public/models/light/cluster_light_sketch150.glb` — new asset (29 MB).
+- `public/models/trees/sketchTree_v3_olive{120,180,210}.glb` — new assets (~9.4 MB each).
+
+---
+
 ## 2026-07-14 (late) — Camera lock, env reparenting, tree recenter fix, bead ornament restored
 
 ### Camera pose locks to canonical initial view on every tree change

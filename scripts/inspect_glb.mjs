@@ -76,6 +76,21 @@ gltf.nodes.forEach((n, i) => {
 });
 console.log(`  Total: ${anomalous}`);
 
+// Materials — highlight ones with emission
+console.log('\n--- Materials ---');
+(gltf.materials || []).forEach((m, i) => {
+  const pbr = m.pbrMetallicRoughness || {};
+  const emissiveFactor = m.emissiveFactor;
+  const emissiveStrength = m.extensions?.KHR_materials_emissive_strength?.emissiveStrength;
+  const hasEmission = (emissiveFactor && emissiveFactor.some(v => v > 0)) || emissiveStrength;
+  const tag = hasEmission ? ' [EMISSIVE]' : '';
+  console.log(`  [${i}] ${m.name || '(unnamed)'}${tag}`);
+  if (emissiveFactor) console.log(`      emissiveFactor: [${emissiveFactor.map(v => v.toFixed(3)).join(', ')}]`);
+  if (emissiveStrength) console.log(`      emissiveStrength (KHR): ${emissiveStrength}`);
+  if (pbr.baseColorFactor) console.log(`      baseColorFactor: [${pbr.baseColorFactor.map(v => v.toFixed(3)).join(', ')}]`);
+  if (m.extensions) console.log(`      extensions: ${Object.keys(m.extensions).join(', ')}`);
+});
+
 // EXT_mesh_gpu_instancing usage — where and how many instances?
 console.log('\n--- EXT_mesh_gpu_instancing nodes ---');
 let gnCount = 0;

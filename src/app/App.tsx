@@ -329,6 +329,16 @@ const DEPERSE_BUILTIN_BULB_COUNT: Record<string, number> = {
   '210cm': 3050, // TODO: confirm 210cm bulb count with client
 };
 
+// 클러스터 (lightId=4) can use a full-authored GLB per (tree × size) instead of the
+// procedural bulb scatter. Only variants listed here get the GLB; anything else falls back
+// to the code-generated scatter. Keyed as `{treeId}-{size}`.
+const CLUSTER_LIGHT_VARIANTS: Record<string, string> = {
+  '3-150cm': '/models/light/cluster_light_sketch150.glb',
+};
+function getClusterGlbPath(treeId: number, size: string): string | undefined {
+  return CLUSTER_LIGHT_VARIANTS[`${treeId}-${size}`];
+}
+
 /** Returns the recommended scene-render bulb count from #트리. Returns 0 when no data. */
 function getSceneBulbCount(treeId: number, size: string, lightId: number, wrap: WrapKey): number {
   const group = TREE_COLOR_GROUP[treeId];
@@ -518,8 +528,11 @@ export default function App() {
       thumbnailKey: 'wireColor',
       thumbnails: { '녹색': '/thumbnails/lights/pastelpop_light_green.webp', '투명': '/thumbnails/lights/pastelpop_light_trans.webp' },
       colorsByBulbColor: {
-        // 6-cycle: 3 warm + 1 each accent → 50% warm, 16.7% each accent
-        '파스텔톤': ['#fff5cc', '#ff9a3d', '#fff5cc', '#7fcc7f', '#fff5cc', '#b48dd6'],
+        // 6-cycle: 3 warm + 1 each accent → 50% warm, 16.7% each accent.
+        // Accents bumped in saturation (2026-07-14 late²) — high emissive intensity + bloom
+        // pushes hues toward white, so the previous pastels read as near-uniform in-scene.
+        // Punchier base colors keep them distinct while still reading as "pastel pop".
+        '파스텔톤': ['#fff5cc', '#ff6a1a', '#fff5cc', '#31d151', '#fff5cc', '#b350f0'],
       },
     },
     3: { // 쥬얼라이트 (RGB) — warm + 다홍(scarlet) per #전구 PDF note
@@ -849,27 +862,27 @@ export default function App() {
     '1-210cm-mix':   '/models/trees/fishboneTree_twotone210.glb',
     '2-180cm-none':  '/models/trees/theFirstTree_test_v4.glb',
     '2-210cm-none':  '/models/trees/theFirstTree_210.glb',
-    '3-120cm-olive': '/models/trees/sketchTree_olive120.glb',
+    '3-120cm-olive': '/models/trees/sketchTree_v3_olive120.glb',
     '3-120cm-snow':  '/models/trees/sketchTree_white120.glb',
     '3-150cm-olive': '/models/trees/sketchTree_v3_olive150.glb',
-    '3-180cm-olive': '/models/trees/sketchTree_olive180.glb',
+    '3-180cm-olive': '/models/trees/sketchTree_v3_olive180.glb',
     '3-180cm-snow':  '/models/trees/sketchTree_white180.glb',
-    '3-210cm-olive': '/models/trees/sketchTree_olive210.glb',
+    '3-210cm-olive': '/models/trees/sketchTree_v3_olive210.glb',
   };
   // Per-(tree, size) shared fallback — used when no color-specific variant exists but the tree
   // wants to swap the base model by size. Tree 4 (스케치 핑크/로즈) reuses sketchTree olive GLBs
   // at the right size, then the treeColor tint (#ffc0cb / #c64073) gets applied on top to
   // differentiate pink vs rose visually.
   const treeSizeFallbackModels: Record<string, string> = {
-    '4-150cm': '/models/trees/sketchTree_olive150.glb',
-    '4-180cm': '/models/trees/sketchTree_olive180.glb',
-    '4-210cm': '/models/trees/sketchTree_olive210.glb',
+    '4-150cm': '/models/trees/sketchTree_v3_olive150.glb',
+    '4-180cm': '/models/trees/sketchTree_v3_olive180.glb',
+    '4-210cm': '/models/trees/sketchTree_v3_olive210.glb',
   };
   const treeDefaultModel: Record<number, string> = {
     1: '/models/trees/fishboneTree_green150.glb',
     2: '/models/trees/fishboneTree_green150.glb', // placeholder until 더퍼스트 트리 model arrives
-    3: '/models/trees/sketchTree_olive150.glb',
-    4: '/models/trees/sketchTree_olive150.glb',   // global fallback if size-specific entry missing
+    3: '/models/trees/sketchTree_v3_olive150.glb',
+    4: '/models/trees/sketchTree_v3_olive150.glb',   // global fallback if size-specific entry missing
   };
   const resolveTreeModel = (treeId: number, size: string, color: string): string => {
     return treeVariantModels[`${treeId}-${size}-${color}`]
@@ -1048,6 +1061,7 @@ export default function App() {
                   : (treeOptionsMap[selectedTree]?.colors.find(c => c.name === selectedColor)?.sceneColor || '#2d5a27')
               }
               lightMode={lightMode}
+              clusterGlbPath={getClusterGlbPath(selectedTree, selectedSize)}
               ornamentConfig={scaledOrnamentConfig}
               rearrangeMode={rearrangeMode || adminPlacementMode}
               hdriPath="/models/hdri/brown_photostudio_02_1k.exr"
