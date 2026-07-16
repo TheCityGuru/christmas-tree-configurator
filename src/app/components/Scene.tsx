@@ -702,6 +702,10 @@ export default function Scene({
       const prevEnv = scene.environment;
       scene.background = null;
       scene.environment = null;
+      // DIAG: one-shot bloom-bucket audit (window.__bloomAudit === true triggers a dump)
+      const auditOn = typeof window !== 'undefined' && (window as any).__bloomAudit === true;
+      const audit: { kept: string[]; cluster: string[]; scaled: Array<{ name: string; intensity: number; emissive: string }>; darkened: string[] } | null =
+        auditOn ? { kept: [], cluster: [], scaled: [], darkened: [] } : null;
       scene.traverse((obj) => {
         if ((obj as THREE.Mesh).isMesh) {
           const mesh = obj as THREE.Mesh;
@@ -720,23 +724,53 @@ export default function Scene({
                 emissiveIntensityCache.set(mat, mat.emissiveIntensity);
                 mat.emissiveIntensity *= CLUSTER_EMISSIVE_SCALE;
               }
+              audit?.cluster.push(mesh.name || '(unnamed)');
+            } else {
+              audit?.kept.push(mesh.name || '(unnamed)');
             }
             return; // keep material for bloom (at full or boosted intensity)
           }
           const mat = mesh.material as THREE.MeshStandardMaterial;
-          if (mat.isMeshStandardMaterial && mat.emissiveIntensity > 0 && mat.emissive && mat.emissive.getHSL({ h: 0, s: 0, l: 0 }).l > 0) {
-            // Emissive but NOT a tree light (e.g., ornaments with authored emissive) —
-            // scale intensity down so it blooms at BLOOM_STRENGTH_OTHER.
+          const isEmissiveNonLight =
+            mat.isMeshStandardMaterial && mat.emissiveIntensity > 0 && mat.emissive && mat.emissive.getHSL({ h: 0, s: 0, l: 0 }).l > 0;
+          if (isEmissiveNonLight && OTHER_EMISSIVE_SCALE > 0) {
+            // Emissive non-light (e.g., ornaments with authored emissive) that we DO want to
+            // bloom faintly (BLOOM_STRENGTH_OTHER > 0) — scale intensity down for the pass.
+            // NOTE: this path still leaks the mesh's diffuse-lit color into the bloom buffer
+            // (the dir light stays on during the prepass and threshold is 0), so it's only
+            // used when a nonzero OTHER bloom is intentionally desired.
             if (!emissiveIntensityCache.has(mat)) {
               emissiveIntensityCache.set(mat, mat.emissiveIntensity);
               mat.emissiveIntensity *= OTHER_EMISSIVE_SCALE;
             }
+            audit?.scaled.push({
+              name: mesh.name || '(unnamed)',
+              intensity: emissiveIntensityCache.get(mat)!, // original
+              emissive: '#' + mat.emissive.getHexString(),
+            });
           } else {
+            // Non-emissive, OR emissive-non-light when BLOOM_STRENGTH_OTHER === 0. Swap to a
+            // flat-black material so the mesh contributes NOTHING to bloom. Zeroing emissive
+            // alone isn't enough: the dir light (intensity 3.77) still lights the diffuse and,
+            // with bloom threshold 0, that lit color would bleed into the bloom halo — which
+            // is exactly the "ornaments respond to bloom strength" bug.
             materialCache.set(mesh, mesh.material);
             mesh.material = darkMaterial;
+            audit?.darkened.push(mesh.name || '(unnamed)');
           }
         }
       });
+      if (audit) {
+        const total = audit.kept.length + audit.cluster.length + audit.scaled.length + audit.darkened.length;
+        console.group(`[bloomAudit] ${total} meshes seen`);
+        console.log(`kept as-is (scatter tree lights): ${audit.kept.length}`);
+        console.log(`cluster boosted (isClusterLight):  ${audit.cluster.length}`);
+        console.log(`scaled to 0 (non-light emissive):  ${audit.scaled.length}`, audit.scaled.slice(0, 20));
+        if (audit.scaled.length > 20) console.log(`  ...and ${audit.scaled.length - 20} more`);
+        console.log(`darkened (non-emissive):            ${audit.darkened.length}`);
+        console.groupEnd();
+        (window as any).__bloomAudit = false; // one-shot
+      }
       // Disable tone mapping for bloom pass (avoid double tone mapping)
       const prevToneMapping = renderer.toneMapping;
       renderer.toneMapping = THREE.NoToneMapping;

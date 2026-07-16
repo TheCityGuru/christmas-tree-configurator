@@ -6,6 +6,18 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-16 (late-2) — Bloom leak fix: emissive ornaments no longer bloom
+
+### 오너먼트 bloom leak
+
+Non-light ornaments with authored emissive were bleeding into the bloom halo and visibly reacting to the bloom strength slider (lil-gui), despite bloom being intended for lights only.
+
+- **Root cause:** the selective-bloom prepass renders non-bloom meshes as flat black. Non-emissive meshes were correctly swapped to `darkMaterial`, but emissive-non-light ornaments only had their `emissiveIntensity` zeroed while keeping their authored material. The directional light (intensity 3.77) stays on during the prepass, so those meshes still rendered their diffuse-lit color — and with bloom threshold `0.0`, that lit brightness fed the bloom buffer.
+- **Fix (`Scene.tsx`):** emissive-non-light meshes now route through the flat-black darken path whenever `BLOOM_STRENGTH_OTHER === 0` (the current config), contributing nothing to bloom. The old emissive-scaling path is preserved but gated behind `OTHER_EMISSIVE_SCALE > 0` for a future intentional faint-ornament-bloom tier (with a comment noting the diffuse-leak caveat).
+- **Result:** only cluster spirals (and scatter bulbs when active) bloom. `__bloomAudit` now reports `scaled: 0`, all non-lights in `darkened`. Ornaments are inert to the bloom strength slider.
+
+---
+
 ## 2026-07-16 (late) — 7-slot color-is-tree restructure, cluster matrix, point ornaments, pick-highlight fix, ornament loading bar
 
 ### 트리 slots — color is now the tree
