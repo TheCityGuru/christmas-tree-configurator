@@ -1101,6 +1101,7 @@ export default function App() {
                   ? undefined
                   : (treeOptionsMap[selectedTree]?.colors.find(c => c.name === selectedColor)?.sceneColor || '#2d5a27')
               }
+              treeSlot={selectedTree}
               lightMode={lightMode}
               clusterGlbPath={getClusterGlbPath(selectedTree, selectedSize, lightWrapMode)}
               ornamentConfig={scaledOrnamentConfig}

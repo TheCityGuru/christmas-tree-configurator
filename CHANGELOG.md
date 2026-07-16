@@ -6,6 +6,25 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-16 (late-3) — Client per-material tree colors (runtime, reversible)
+
+### 트리 에셋 컬러값 (client spec)
+
+Client-specified per-material colors applied to the 6 colored tree slots. Because sketch slots 4–7 share one GLB (`sketchTree_v3_olive*`), this is a **runtime override**, not baked into the assets.
+
+- **New `CLIENT_TREE_COLORS` map** (`Scene.tsx`, module scope) — `Record<slot, Record<materialName, hex>>`:
+  - 1 피시본 그린: `Material.001`→`#11330a`, `Material.003`→`#22401c`
+  - 2 피시본 투톤: `Material.001`→`#23330a`, `Material.003`→`#143211`, `Material.005`→`#526430`
+  - 4 스케치 올리브: `Material`→`#557d40`, `Material.006`→`#2a451c`, 받침대/가지(`.004`/`.005`)→deep green
+  - 5 스케치 스노우: all materials → `#ffffff`
+  - 6 스케치 로즈: `Material`→`#f01414`, `Material.003`→`#580909`, `Material.006`→`#b90404`, 받침대/가지→deep green
+  - 7 스케치 핑크: `Material`→`#fe90a4`, `Material.006`→`#f7738b`, 받침대/가지→`#ffffff`
+- **받침대/가지 = `Material.004` (Stand) + `Material.005` (woody stem)** — verified via mesh→material inspection of the sketch GLB. `CLIENT_DEEP_GREEN` sentinel reuses the authored Stand color so "그린 트리들과 동일" needs no hardcoded hex (avoids colorspace drift).
+- **Consolidated per-slot coloring effect** replaces the old `treeColor` effect. Rebuilds each material every slot/color/load change in three layers: authored baseline → `treeColor` tint (foliage) → client override (wins). Captures `baseColorAuthored`/`isFoliageAuthored` at load so switches are fully reversible (matters for the shared sketch GLB). New `treeSlot` prop (App passes `selectedTree`); dot-insensitive material-name matching.
+- **Rollback:** set `APPLY_CLIENT_TREE_COLORS = false` (resets every material to authored) or revert this commit.
+
+---
+
 ## 2026-07-16 (late-2) — Bloom leak fix: emissive ornaments no longer bloom
 
 ### 오너먼트 bloom leak

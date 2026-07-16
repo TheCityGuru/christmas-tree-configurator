@@ -84,6 +84,8 @@ interface SceneProps {
   treeModelPath?: string;
   /** Tree color — applied to foliage materials */
   treeColor?: string;
+  /** Tree slot id (1..7) — keys the client per-material color spec (see CLIENT_TREE_COLORS) */
+  treeSlot?: number;
 
   /** Light mode: 'on' = steady, 'blink' = alternating curves, 'off' = no emission */
   lightMode?: 'on' | 'blink' | 'off';
@@ -175,6 +177,36 @@ ornamentNormalMap.repeat.set(3.5, 3.5);
 
 // Dark material used to hide non-emissive objects during bloom pass
 const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+// ---- Client tree-asset color spec (2026-07-17) ----------------------------------------------
+// Per-slot, per-material recolor requested by the client. Applied at RUNTIME (not baked into the
+// GLBs) because sketch slots 4-7 all share `sketchTree_v3_olive*`; a runtime override is the only
+// way to give them distinct colors from one geometry. The consolidated tree-coloring effect reads
+// this map.
+//
+// ROLLBACK: set APPLY_CLIENT_TREE_COLORS = false to restore the authored asset colors instantly
+// (the effect resets every material to its captured authored baseColor before applying anything),
+// or `git revert` this commit.
+//
+// Keys are GLTF material names. The GLTF loader may strip the dot, so matching is dot-insensitive
+// (`normMatName`). Special values:
+//   '*'              → apply to EVERY material (스케치 스노우 = all-white).
+//   CLIENT_DEEP_GREEN → reuse the authored Stand color (Material.004) so 받침대/가지 stays
+//                       "그린 트리들과 동일" without hardcoding a hex (avoids colorspace drift).
+// Base/branch (받침대,가지) resolves to Material.004 (Stand) + Material.005 (woody stem), verified
+// via mesh→material inspection of the sketch GLB.
+const APPLY_CLIENT_TREE_COLORS = true;
+const CLIENT_DEEP_GREEN = '__STAND__';
+const CLIENT_WHITE = '#ffffff';
+const CLIENT_TREE_COLORS: Record<number, Record<string, string>> = {
+  1: { 'Material.001': '#11330a', 'Material.003': '#22401c' },                                    // 피시본 그린
+  2: { 'Material.001': '#23330a', 'Material.003': '#143211', 'Material.005': '#526430' },         // 피시본 투톤
+  4: { 'Material': '#557d40', 'Material.006': '#2a451c', 'Material.004': CLIENT_DEEP_GREEN, 'Material.005': CLIENT_DEEP_GREEN }, // 스케치 올리브
+  5: { '*': CLIENT_WHITE },                                                                        // 스케치 스노우 (material 전체 + 받침대 white)
+  6: { 'Material': '#f01414', 'Material.006': '#b90404', 'Material.003': '#580909', 'Material.004': CLIENT_DEEP_GREEN, 'Material.005': CLIENT_DEEP_GREEN }, // 스케치 로즈
+  7: { 'Material': '#fe90a4', 'Material.006': '#f7738b', 'Material.004': CLIENT_WHITE, 'Material.005': CLIENT_WHITE },           // 스케치 핑크
+};
+const normMatName = (n: string) => (n || '').replace(/\./g, '').toLowerCase();
 
 // Canonical initial camera pose — reused by initial setup AND the per-tree-change reset
 // effect so switching trees always snaps back to the same starting viewpoint regardless
@@ -414,6 +446,7 @@ export default function Scene({
   // for variant-specific GLBs (e.g. theFirstTree, twotone) whose authored materials
   // should render as-shipped. A default here silently overrode that opt-out.
   treeColor,
+  treeSlot,
 
   lightMode = 'on',
   ornamentConfig = [],
@@ -1227,10 +1260,14 @@ export default function Scene({
           const mats = Array.isArray(mat) ? mat : [mat];
           mats.forEach((m) => {
             if (!m?.color) return;
+            // Capture the authored baseColor ONCE so the per-slot coloring effect can reset to it
+            // (makes slot/color switches fully reversible, incl. the client color overrides).
+            if (!m.userData.baseColorAuthored) m.userData.baseColorAuthored = m.color.clone();
             m.color.getHSL(hsl);
             if (hsl.h > 0.2 && hsl.h < 0.45) {
               m.userData.isFoliage = true;
             }
+            m.userData.isFoliageAuthored = !!m.userData.isFoliage;
           });
         });
 
@@ -1672,31 +1709,65 @@ export default function Scene({
     return () => { cancelled = true; };
   }, [treeReady, clusterGlbPath, lightLayers]);
 
-  // ---- Update tree color on foliage materials ----
-  // Uses the load-time `userData.isFoliage` tag (set during tree load) instead of a hue gate.
-  // The old hue gate was stateful: after switching to a non-greenish color (e.g. 스노우),
-  // the gate could never reverse the change. treeReady is in deps so newly loaded trees
-  // pick up the current treeColor immediately.
-  //
-  // When treeColor is undefined (App passes `undefined` for variant-specific GLBs whose
-  // authored materials should be preserved — e.g. fishbone twotone), skip recoloring entirely
-  // so the authored multi-tone look survives.
+  // ---- Per-slot tree material coloring ----
+  // Single source of truth for tree colors. Runs on every slot/color/load change and rebuilds
+  // each material's color deterministically in three layers, so switches are fully reversible:
+  //   1. Restore the authored baseColor + foliage tag captured at load.
+  //   2. Apply the treeColor tint to foliage materials (the legacy behavior; skipped when
+  //      treeColor is undefined so authored multi-tone GLBs render as-shipped).
+  //   3. Apply the client per-material override (CLIENT_TREE_COLORS) on top — it wins over the
+  //      tint and marks the material non-foliage so nothing re-tints an explicit client color.
   useEffect(() => {
     const target = loadedModelRef.current;
-    if (!target || !treeColor) return;
+    if (!target) return;
 
-    const color = new THREE.Color(treeColor);
+    const tint = treeColor ? new THREE.Color(treeColor) : null;
+    const spec = APPLY_CLIENT_TREE_COLORS && treeSlot ? CLIENT_TREE_COLORS[treeSlot] : undefined;
+    const allOverride = spec?.['*'];
+
+    // Resolve the deep-green sentinel to the authored Stand color (Material.004) once.
+    let deepGreen: THREE.Color | null = null;
+    if (spec) {
+      target.traverse((child) => {
+        if (deepGreen || !(child as THREE.Mesh).isMesh) return;
+        const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
+        (Array.isArray(mat) ? mat : [mat]).forEach((m) => {
+          if (!deepGreen && m && normMatName(m.name) === 'material004') {
+            deepGreen = ((m.userData.baseColorAuthored as THREE.Color) ?? m.color).clone();
+          }
+        });
+      });
+    }
+
     target.traverse((child) => {
       if (!(child as THREE.Mesh).isMesh) return;
       const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[];
       const mats = Array.isArray(mat) ? mat : [mat];
       mats.forEach((m) => {
-        if (!m?.userData?.isFoliage || !m.color) return;
-        m.color.copy(color);
+        if (!m?.color) return;
+        // 1. authored baseline
+        if (m.userData.baseColorAuthored) m.color.copy(m.userData.baseColorAuthored as THREE.Color);
+        m.userData.isFoliage = !!m.userData.isFoliageAuthored;
+        // 2. treeColor tint on foliage
+        if (tint && m.userData.isFoliage) m.color.copy(tint);
+        // 3. client per-material override
+        if (spec) {
+          let hex = allOverride;
+          if (hex === undefined) {
+            const nn = normMatName(m.name);
+            for (const key in spec) {
+              if (key !== '*' && normMatName(key) === nn) { hex = spec[key]; break; }
+            }
+          }
+          if (hex !== undefined) {
+            m.color.copy(hex === CLIENT_DEEP_GREEN ? (deepGreen ?? new THREE.Color('#0a1f08')) : new THREE.Color(hex));
+            m.userData.isFoliage = false;
+          }
+        }
         m.needsUpdate = true;
       });
     });
-  }, [treeColor, treeReady]);
+  }, [treeColor, treeReady, treeSlot]);
 
   // ---- Toggle light emission: on / blink / off ----
   useEffect(() => {
