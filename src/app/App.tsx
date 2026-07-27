@@ -42,7 +42,7 @@ const ORNAMENT_SET_1: OrnamentSet = [
   { path: '/models/ornaments/angelina/bead.glb', qty: 15 },
 ];
 
-// 겨울숲 20pcs — 7 GLBs summing to exactly 20 pieces. WebP-compressed (~10 MB total on disk).
+// 겨울숲 20pcs — 7 GLBs summing to exactly 20 pieces. WebP textures; 7.glb also Meshopt-compressed (~15 MB total on disk).
 const ORNAMENT_SET_4: OrnamentSet = [
   { path: '/models/ornaments/winter_forrest/1.glb', qty: 4 },
   { path: '/models/ornaments/winter_forrest/2.glb', qty: 2 },
