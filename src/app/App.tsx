@@ -105,12 +105,12 @@ const ORNAMENT_SET_3: OrnamentSet = [
   { path: '/models/ornaments/disco/Tangled_Silver_Orb.glb',     qty: 5 },
 ];
 
-// 도트볼 18pcs — 6 GLBs × 3 each = 18 pieces. WebP-compressed (~7 MB on disk).
+// 도트볼 18pcs — 6 GLBs × 3 each = 18 pieces. WebP-compressed (~6.5 MB on disk).
 const ORNAMENT_SET_5: OrnamentSet = [
   { path: '/models/ornaments/dotted_balls/Blue_Ho_Ho_Ho.glb',    qty: 3 },
-  { path: '/models/ornaments/dotted_balls/Green_Dotted_orb.glb', qty: 3 },
+  { path: '/models/ornaments/dotted_balls/Green_Dotted_orb2.glb', qty: 3 },
   { path: '/models/ornaments/dotted_balls/Mint_Glitter_orb.glb', qty: 3 },
-  { path: '/models/ornaments/dotted_balls/Pink_Dotted_orb.glb',  qty: 3 },
+  { path: '/models/ornaments/dotted_balls/Pink_Dotted_orb2.glb',  qty: 3 },
   { path: '/models/ornaments/dotted_balls/Pink_Ho_Ho_Ho.glb',    qty: 3 },
   { path: '/models/ornaments/dotted_balls/Pink_starry_orb.glb',  qty: 3 },
 ];
