@@ -211,8 +211,17 @@ const normMatName = (n: string) => (n || '').replace(/\./g, '').toLowerCase();
 // Canonical initial camera pose — reused by initial setup AND the per-tree-change reset
 // effect so switching trees always snaps back to the same starting viewpoint regardless
 // of prior orbit state.
-const INITIAL_CAMERA_POSITION = new THREE.Vector3(-1.4, 0.55, 1.2);
 const INITIAL_ORBIT_TARGET = new THREE.Vector3(0, 0.70, 0);
+// Furthest the OrbitControls allow (mirrored into controls.maxDistance below).
+const MAX_CAMERA_DISTANCE = 4;
+// Land fully zoomed out: keep the original framing direction (-1.4, 0.55, 1.2) relative to
+// the target, but push the camera out to MAX_CAMERA_DISTANCE so it starts at max zoom-out.
+const INITIAL_CAMERA_POSITION = INITIAL_ORBIT_TARGET.clone().add(
+  new THREE.Vector3(-1.4, 0.55, 1.2)
+    .sub(INITIAL_ORBIT_TARGET)
+    .normalize()
+    .multiplyScalar(MAX_CAMERA_DISTANCE),
+);
 
 /** Compute a model's world-space AABB, skipping meshes named `PVC*`. The PVC pipe in
  *  several tree GLBs (sketchTree_v3+) extends below the visible stand as a hidden
@@ -633,7 +642,7 @@ export default function Scene({
     controls.enablePan = false;
     controls.target.copy(INITIAL_ORBIT_TARGET);
     controls.minDistance = 1.5;
-    controls.maxDistance = 4;
+    controls.maxDistance = MAX_CAMERA_DISTANCE;
     controls.minPolarAngle = Math.PI * 7 / 36;   // 35°
     controls.maxPolarAngle = Math.PI * 115 / 180;   // 115° (loosened so camera can dip to floor; AABB clamp does hard enforcement)
     controlsRef.current = controls;
