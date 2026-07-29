@@ -6,6 +6,28 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-29 — Candy_shop macaron swap + camera lands fully zoomed out (`cb213ac`)
+
+### 캔디샵 마카롱 교체 (green/purple/red)
+
+- Replaced the `candy_shop` macaron set: `macaron.glb` / `macaron2.glb` / `macaron3.glb` →
+  `macaron_green.glb` / `macaron_purple.glb` / `macaron_red.glb`. Rewired in `App.tsx` ORNAMENT
+  list (qty preserved: green 4, purple 2, red 4). Old three deleted from repo.
+- **Optimized each new macaron ~11 MB → ~0.5 MB** (~22×). Source was uncompressed 2048² PNG
+  textures; geometry was already low-poly (~6k tris) so **no mesh simplify**. Pipeline:
+  `gltf-transform optimize --texture-compress webp --texture-size 1024 --compress draco
+  --simplify false`. `KHR_materials_clearcoat` + `KHR_materials_sheen` preserved. Loader already
+  supports DRACO + EXT_texture_webp, so no code change beyond wiring.
+- 11 MB `_src.glb` backups kept **local only** (not committed), same as winter_forrest `6_hi`.
+
+### 카메라 기본 줌 — 최대 줌아웃으로 착지
+
+- Default landing camera now starts at the OrbitControls `maxDistance` (furthest zoom-out) instead
+  of distance ~1.85. `Scene.tsx`: added `MAX_CAMERA_DISTANCE = 4` const; `INITIAL_CAMERA_POSITION`
+  is now computed as target + original view direction × MAX_CAMERA_DISTANCE (same angle, pushed out
+  to `(-3.027, 0.376, 2.595)`). `controls.maxDistance` reads the same const. Applies to reset-on-
+  tree-swap too. env AABB wall-clamp still applies on the first frame.
+
 ## 2026-07-16 (late-3) — Client per-material tree colors (runtime, reversible)
 
 ### 트리 에셋 컬러값 (client spec)
