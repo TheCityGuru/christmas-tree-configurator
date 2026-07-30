@@ -6,6 +6,29 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-30 — Ornament GLB model updates (`609af0b`)
+
+### 오너먼트 GLB 모델 갱신
+
+- Updated/re-exported **36 ornament `.glb` models** across 7 collections:
+  - `angelina` (1): `ribon_custom_material.glb`
+  - `ballet` (7): `Cherub_with_Guitar`, `Crystal_Alicorn`, `Crystal_Ballerina`,
+    `Iridescent_Orb_L/M/S`, `Iridescent_Reindeer`
+  - `candy_shop` (3): `Blue_and_White_Stripe`, `Pink_and_White`, `blue_glitter`
+  - `disco` (13): `Beaded_Silver_Orb`, `Crystal_Fairy`, `Crystal_Reindeer`, `Disco_Ball_L`,
+    `Geometric_Silver_Star`, `Gingerbread_Santa`, `Glittering_White_Orb_L/s`,
+    `MerryChistmas_Sign`, `Silver_Bell`, `Silver_Christmas_Tree`, `Silver_Star_top`,
+    `Tangled_Silver_Orb`
+  - `dotted_balls` (3): `Green_Dotted_orb2`, `Pink_Dotted_orb2`, `Pink_starry_orb`
+  - `ice` (6): `Bead_Tassel`, `Crystal_Pendant`, `Crystal_Teardrop`, `Crystal_prism`,
+    `Faceted_Crystal`, `Silver_Mirror_Ball`
+  - `winter_forrest` (3): `4.glb`, `6.glb`, `7.glb`
+- Asset-only change (no code changes). Local-only working files — candy_shop `macaron_*_src.glb`,
+  winter_forrest `6_hi.glb` / `6_prev_backup.glb` — intentionally **not committed**, same policy
+  as prior pushes.
+
+---
+
 ## 2026-07-29 — Candy_shop macaron swap + camera lands fully zoomed out (`cb213ac`)
 
 ### 캔디샵 마카롱 교체 (green/purple/red)
