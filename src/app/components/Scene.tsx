@@ -12,6 +12,24 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { MeshSurfaceSampler } from 'three/addons/math/MeshSurfaceSampler.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import GUI from 'lil-gui';
+import { makeSparkleCrystal, type PinkLuceModel, type SparkleCrystal } from './pinkLuceMaterial';
+
+// ---- Pink Lucé sparkle-crystal family -------------------------------------
+// 11 models under /models/ornaments/pink/ whose crystal mesh gets the approved
+// sparkle material (replaces the baked GLB material at load). Match by model
+// name at this path only; the pink accent balls/beads keep their own materials.
+const PINK_LUCE_BASE_PATH = '/models/ornaments/pink/';
+const PINK_LUCE_MODELS = new Set<string>([
+  'carousel', 'dress', 'flakeStar', 'floral', 'key', 'shell',
+  'snowFlake', 'sphere', 'train', 'unicorn', 'wing',
+  // opaque glitter balls (patch): body carries only a normalMap, no basecolor.
+  'white_glitter_ball_L', 'white_glitter_ball_S',
+]);
+/** Returns the model name if `ornPath` is a pink-luce crystal, else null. */
+function pinkLuceModel(ornPath: string): PinkLuceModel | null {
+  const m = ornPath.match(/\/ornaments\/pink\/([^/]+)\.glb$/);
+  return m && PINK_LUCE_MODELS.has(m[1]) ? (m[1] as PinkLuceModel) : null;
+}
 
 // ---------- Types ----------
 export interface PlacementEntry {
@@ -490,6 +508,11 @@ export default function Scene({
   const ornamentCacheRef = useRef<Map<string, THREE.Group>>(new Map());
   // Instanced ornament registry
   const ornRegistryRef = useRef<OrnamentRegistry | null>(null);
+  /** Pink Lucé sparkle materials for the currently-placed crystal ornaments.
+   *  Rebuilt on every ornament rebuild; disposed alongside the registry. */
+  const pinkLuceHandlesRef = useRef<SparkleCrystal[]>([]);
+  /** Per-frame sun-direction sync, one per placed pink-luce model. */
+  const sparkleUpdatersRef = useRef<Array<(camera: THREE.Camera) => void>>([]);
   const guiRef = useRef<GUI | null>(null);
   const composerRef = useRef<EffectComposer | null>(null);
   const bloomPassRef = useRef<UnrealBloomPass | null>(null);
@@ -739,6 +762,12 @@ export default function Scene({
       animFrameRef.current = requestAnimationFrame(animate);
       controls.update();
 
+      // Sync pink-luce sparkle sun direction (view-space) — identical for all
+      // models, drives both beauty + bloom-variant materials via shared uniform.
+      if (sparkleUpdatersRef.current.length) {
+        for (const upd of sparkleUpdatersRef.current) upd(camera);
+      }
+
       // Pass 1: Render bloom — swap non-emissive materials to black
       const prevBg = scene.background;
       const prevEnv = scene.environment;
@@ -771,6 +800,14 @@ export default function Scene({
               audit?.kept.push(mesh.name || '(unnamed)');
             }
             return; // keep material for bloom (at full or boosted intensity)
+          }
+          // Pink-luce crystal: render the sparkle-only variant into the bloom
+          // buffer (opaque black base + sparkle emissive) so ONLY glints halo,
+          // not the whole lit crystal. Restored after the pass via materialCache.
+          if (mesh.userData?.pinkLuceBloomMat) {
+            materialCache.set(mesh, mesh.material);
+            mesh.material = mesh.userData.pinkLuceBloomMat as THREE.Material;
+            return;
           }
           const mat = mesh.material as THREE.MeshStandardMaterial;
           const isEmissiveNonLight =
@@ -1794,6 +1831,14 @@ export default function Scene({
       });
     };
 
+    // Helper: show/hide every bulb mesh so 'off' removes them from the scene
+    // entirely (not just dark, unlit spheres).
+    const setBulbsVisible = (visible: boolean) => {
+      treeLightGroupsRef.current.forEach((mesh) => {
+        mesh.visible = visible;
+      });
+    };
+
     // Clear any prior blink interval before reapplying
     if (blinkIntervalRef.current) {
       clearInterval(blinkIntervalRef.current);
@@ -1801,13 +1846,16 @@ export default function Scene({
     }
 
     if (lightMode === 'off') {
+      setBulbsVisible(false);
       setBlinkGroupLit('A', false);
       setBlinkGroupLit('B', false);
     } else if (lightMode === 'on') {
+      setBulbsVisible(true);
       setBlinkGroupLit('A', true);
       setBlinkGroupLit('B', true);
     } else {
       // 'blink' — alternate A/B every 500ms
+      setBulbsVisible(true);
       let aLit = true;
       setBlinkGroupLit('A', aLit);
       setBlinkGroupLit('B', !aLit);
@@ -1871,6 +1919,10 @@ export default function Scene({
       });
       ornRegistryRef.current = null;
     }
+    // Dispose previous pink-luce sparkle materials + textures, reset updaters.
+    pinkLuceHandlesRef.current.forEach(h => h.dispose());
+    pinkLuceHandlesRef.current = [];
+    sparkleUpdatersRef.current = [];
 
     if (!model || ornamentConfig.length === 0) {
       ornGroup.clear();
@@ -2077,6 +2129,7 @@ export default function Scene({
           || ornPath.includes('ribon_custom_material')
           || ornPath.includes('Silver_Ornament_Ball_')
           || ornPath.endsWith('/ornaments/angelina/bead.glb');
+        const plModel = pinkLuceModel(ornPath); // non-null → sparkle-crystal family
         const strOffset = stringOffsetByPath.get(ornPath) || new THREE.Vector3();
         const count = pathPlacements.length;
 
@@ -2098,7 +2151,27 @@ export default function Scene({
             srcMesh.geometry.computeVertexNormals();
           }
           let material: THREE.Material;
-          if (keepOriginalMaterial) {
+          // Pink-luce crystal child = the textured body mesh. Crystals carry a
+          // basecolor `map`; the opaque glitter balls carry only a `normalMap`.
+          // Match by EITHER texture — never by material name (names are unreliable).
+          // Cap/hanger meshes carry neither and keep their (silver) originals.
+          let crystalHandle: SparkleCrystal | null = null;
+          const renderer = rendererRef.current;
+          const srcMat = srcMesh.material as THREE.MeshStandardMaterial;
+          const isCrystalChild =
+            !!plModel && !!renderer && !!(srcMat?.map || srcMat?.normalMap);
+          if (isCrystalChild) {
+            const dl = dirLightRef.current;
+            const sunWorldDir = dl
+              ? dl.position.clone().sub(dl.target.position).normalize()
+              : undefined;
+            crystalHandle = makeSparkleCrystal(renderer!, {
+              model: plModel!, sunWorldDir, basePath: PINK_LUCE_BASE_PATH,
+            });
+            pinkLuceHandlesRef.current.push(crystalHandle);
+            sparkleUpdatersRef.current.push(crystalHandle.updateSparkle);
+            material = crystalHandle.material;
+          } else if (keepOriginalMaterial) {
             material = (srcMesh.material as THREE.Material).clone();
           } else {
             const hasUVs = !!srcMesh.geometry?.attributes?.uv;
@@ -2106,6 +2179,10 @@ export default function Scene({
           }
 
           const instMesh = new THREE.InstancedMesh(srcMesh.geometry, material, count);
+          if (crystalHandle) {
+            // Bloom prepass swaps to this variant so only glints halo.
+            instMesh.userData.pinkLuceBloomMat = crystalHandle.bloomMaterial;
+          }
           instMesh.castShadow = false;
           instMesh.receiveShadow = false;
           instMesh.frustumCulled = false; // ornaments spread across tree
