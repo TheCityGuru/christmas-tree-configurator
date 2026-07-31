@@ -6,6 +6,41 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-07-31 — Pink Lucé sparkle-crystal material for 핑크루체 (`9c929c1`)
+
+### 핑크루체 스파클 크리스탈 재질 적용
+
+- Replaced the **11 crystal models** in the 핑크루체 set (ornament id 8) —
+  `carousel, dress, flakeStar, floral, key, shell, snowFlake, sphere, train,
+  unicorn, wing` — plus the **2 white glitter balls** with a PM-approved
+  runtime "sparkle crystal" material. The look lives in **code, not the GLBs**:
+  each model's textured mesh gets a `MeshPhysicalMaterial` + `onBeforeCompile`
+  sparkle shader driven by 7 PNG maps (`basecolor / metalRough / normal /
+  transmission / iridescence / glittermask / dotdata`).
+- **New file** `src/app/components/pinkLuceMaterial.ts` — `makeSparkleCrystal()`
+  factory. Approved params: ior 1.4, thickness 0.35 (unicorn 1.4 so it reads as
+  crystal not chrome), iridescence, `uSparkleIntensity 4.5 / uGlintSharp 0.982`.
+- **Selective-bloom fit:** the app blooms via a tag-and-darken prepass (threshold
+  0), so a plain tag would bloom the whole lit crystal. Added a **sparkle-only
+  bloom-prepass variant** (shares the same uniforms/textures, opaque black base,
+  transmission off, own `uBloomScale`) so only glints could halo. Halo currently
+  imperceptible under the app's lighting and left as-is per review.
+- **Scene.tsx:** material assigned to the textured body mesh, matched by
+  `map || normalMap` (**never by material name** — names collide, e.g.
+  `Material_0.001` / two `Material.001`). Per-frame `updateSparkle(camera)`,
+  bloom-prepass swap, and full dispose on ornament rebuild.
+- **White glitter balls** (were gray "silver glitter ball"): body carries only a
+  normalMap (why the match rule now includes `normalMap`); rendered **opaque**
+  (`transmission: 0`, skips the costly transmission pass), 3-level dot color
+  (0=pink / ~128=white / 255=green — legacy 0/255 maps keep the 11 crystals
+  unchanged), and UV `RepeatWrapping` (balls tile ~6×). Silver caps + hangers
+  keep their originals.
+- Accents and all quantities unchanged. Only `carousel.glb` and `wing.glb` were
+  re-exported; the other 9 crystals and both ball GLBs are byte-identical to the
+  prior commit (geometry unchanged — the look is entirely material/texture).
+
+---
+
 ## 2026-07-30 — Ornament GLB model updates (`609af0b`)
 
 ### 오너먼트 GLB 모델 갱신
