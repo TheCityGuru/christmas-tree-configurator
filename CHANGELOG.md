@@ -6,6 +6,56 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-08-03 — Page 2 options sheet + ice/discoNight crystal sets + disco orb patch (`2a8dcef`)
+
+### Page 2 옵션 UI
+
+- The bottom **options container** on Page 2 (전구) is now a **folding
+  bottom-sheet**. Folded by default — collapsed to a slim handle just above the
+  footer — so the light thumbnails get maximum vertical room. It **auto-slides
+  up** over the lower thumbnails when a light is selected (better view of the
+  options) and the **handle folds it back down**. Pure `translateY` transform;
+  invisible in behavior otherwise.
+- **수량 선택** moved to the **top** of the options list.
+- **팝팝 혼합색** blue `#b8d4e8` → `#3b82f6`. The pale sky-blue washed out to white
+  under emissive + bloom; the saturated azure holds its hue so warm-white vs.
+  blue are distinguishable on the tree. Blue ratio bumped 1/4 → 1/3.
+
+### 아이스젬 (ice) — new sparkle-crystal set
+
+- Wired the **5 clear-crystal ice models** (`Bead_Tassel, Crystal_Pendant,
+  Crystal_prism, Crystal_Teardrop, Faceted_Crystal`) through the
+  `makeSparkleCrystal` factory — `sparkle: false` (pure crystal, no glint/bloom),
+  same treatment as 스노우크리스탈. Maps served flat from `/models/ornaments/ice/`.
+- **Name collision handled:** ice reuses 5 snowCrystal model names but the GLBs +
+  maps live in their own dir → keyed by `(set, model)`. `Silver_Mirror_Ball` (the
+  set's 6th GLB) is excluded by the Set gate → keeps its baked silver material.
+- Slot already existed (아이스젬 18pcs, ornament id 6) — no UI change.
+
+### 디스코나잇 (discoNight) — crystal models + white-orb patch
+
+- Wired **Crystal_Fairy** (sparkle **ON** — pink/mint glitter on the wings only,
+  mask-driven) and **Crystal_Reindeer** (sparkle **OFF** — pure crystal) via
+  **per-model split** sparkle registration (`sparkleSpecFor` now resolves the
+  sparkle flag per model, not per set).
+- **White orbs** (`Glittering_White_Orb_L/s`) swapped to 스노우크리스탈's patched,
+  optimized GLBs (**~37.7 MB → ~3.3 MB**) and added to `SPARKLE_BORROW` so they
+  render the identical white-glitter-ball look. Disco keeps its own paths, so its
+  orb placement counts stay independent of the snow set.
+
+### Under the hood
+
+- `makeSparkleCrystal` gains an optional **`overrideKey`** so the per-model tuning
+  tables (`OVERRIDES` / `GLINT_SHARP`) are keyed by `(set, model)` — a future
+  ice-specific tweak can't bleed into snow. Legacy pink/borrow behavior unchanged.
+- **sketchTree cluster lights:** the authored cluster GLB is rotated **90° CW
+  about Y** so its dense region aligns with the front hemisphere (`z >= 0`) used
+  by front-only ornaments + scatter lights; invisible in 360 mode.
+- Relay specs + acceptance viewers (ice, discoNight) moved out of shipped
+  `public/` into **`docs/ornament-relays/`**.
+
+---
+
 ## 2026-07-31 — Pink Lucé sparkle-crystal material for 핑크루체 (`9c929c1`)
 
 ### 핑크루체 스파클 크리스탈 재질 적용
