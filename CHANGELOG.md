@@ -6,6 +6,16 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-08-03 — sketchTree pink/rose/olive material color tweaks (`81786a5`)
+
+- Updated `CLIENT_TREE_COLORS` per-material overrides for the sketch trees:
+  - **핑크** (7): `Material` + `Material.006` → `#FF9EBB`; **new** `Material.003` → `#CC7B93`.
+  - **로즈** (6): `Material.003` → `#800000` (other reds unchanged).
+  - **올리브** (4): `Material` → `#4E7132`, `Material.006` → `#394F26`; **new** `Material.003` → `#213B0C`.
+- Stand/stem (`Material.004/005`) and 스노우 untouched.
+
+---
+
 ## 2026-08-03 — Commit missing snowCrystal texture maps (`9875dcf`)
 
 - The **스노우크리스탈** set's 7-map PNG sets for all **11 models** were never
