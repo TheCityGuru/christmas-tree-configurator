@@ -6,6 +6,14 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-08-03 — Commit missing snowCrystal texture maps (`9875dcf`)
+
+- The **스노우크리스탈** set's 7-map PNG sets for all **11 models** were never
+  committed — the deployed set would 404 its textures. Added all **77 maps**
+  under `/models/ornaments/snow/`. No code change; fixes a missing-asset gap.
+
+---
+
 ## 2026-08-03 — Page 2 options sheet + ice/discoNight crystal sets + disco orb patch (`2a8dcef`)
 
 ### Page 2 옵션 UI
