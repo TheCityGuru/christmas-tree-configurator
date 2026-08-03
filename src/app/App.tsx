@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronLeft, ChevronRight, Save, FolderOpen, Monitor, Globe, GripVertical, Wrench, ShoppingBag, Ruler, Palette, Gem, Lightbulb, Check, RotateCw, RefreshCw, Camera, MousePointer2, Hand, Grip, LayoutGrid, Mouse, ZoomIn, HelpCircle, Package, Eye, Info, TreePine } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Save, FolderOpen, Monitor, Globe, GripVertical, Wrench, ShoppingBag, Ruler, Palette, Gem, Lightbulb, Check, RotateCw, RefreshCw, Camera, MousePointer2, Hand, Grip, LayoutGrid, Mouse, ZoomIn, HelpCircle, Package, Eye, Info, TreePine } from 'lucide-react';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import Scene from '@/app/components/Scene';
 import type { SceneActions, StoredOrnamentInfo, PlacementPreset } from '@/app/components/Scene';
@@ -85,7 +85,9 @@ const ORNAMENT_SET_2: OrnamentSet = [
   { path: '/models/ornaments/candy_shop/Sprinkled_donut3.glb',            qty: 2 },
 ];
 
-// 디스코나잇 50pcs — 15 GLBs summing to 50 pieces. WebP-compressed (~51 MB on disk).
+// 디스코나잇 50pcs — 15 GLBs summing to 50 pieces. WebP-compressed (~17 MB on disk
+// after the white-orb patch swap — the two Glittering_White_Orb GLBs now share
+// 스노우크리스탈's optimized versions, ~37.7 MB → ~3.3 MB).
 // Silver_Star_top.glb auto-anchors to `top_point` via Scene.tsx ANCHORED_PLACEMENTS regex.
 const ORNAMENT_SET_3: OrnamentSet = [
   { path: '/models/ornaments/disco/Beaded_Silver_Orb.glb',      qty: 5 },
@@ -543,8 +545,10 @@ export default function App() {
       thumbnails: { '전구색': '/thumbnails/lights/popop_light_warm.jpg', '혼합색': '/thumbnails/lights/popop_light_multiColor.jpg' },
       colorsByBulbColor: {
         '전구색': ['#fff5cc'],
-        // 혼합색: 3/4 warm white + 1/4 powdery sky blue (soft pale)
-        '혼합색': ['#fff5cc', '#fff5cc', '#fff5cc', '#b8d4e8'],
+        // 혼합색: warm white + saturated azure blue. Pale sky-blue washed out to
+        // white under bloom/emissive; a vivid blue holds its hue so the two are
+        // clearly distinguishable. ~1/3 blue for prominence.
+        '혼합색': ['#fff5cc', '#fff5cc', '#3b82f6'],
       },
     },
     2: { // 파스텔팝 — warm-white center with orange/green/purple harmoniously mixed (per #전구 PDF note)
@@ -596,6 +600,15 @@ export default function App() {
   const [selectedPointOrnament, setSelectedPointOrnament] = useState(0);
   const [ornamentQty, setOrnamentQty] = useState(1);
   const [pointOrnamentQty, setPointOrnamentQty] = useState(1);
+  // Cart quantity (number of SKU sets) for the selected light. Defaults to 1 on
+  // light change; a 360 recommendation click syncs it to getCartSetCount. This is
+  // the value committed to the cart (the 360 buttons are now suggestions, not the
+  // mandatory qty driver).
+  const [lightSetQty, setLightSetQty] = useState(1);
+  // Page 2 options sheet fold state. Default folded (down) so the light
+  // thumbnails get maximum vertical room; auto-slides up when a light is
+  // selected, and the handle folds it back down. See effect below.
+  const [optionsSheetOpen, setOptionsSheetOpen] = useState(false);
   const [showHint, setShowHint] = useState(() => {
     const stored = localStorage.getItem('viewGuideHideUntil');
     return stored ? Date.now() >= Number(stored) : true;
@@ -643,6 +656,16 @@ export default function App() {
       setLightBulbColor(opts.bulbColor[0]);
       setLightWireColor(opts.wireColor[0]);
     }
+    // Quantity always resets to 1 on light change — the 360 recommendations are
+    // opt-in, so a freshly selected light starts at qty 1 until the user clicks one.
+    setLightSetQty(1);
+  }, [selectedLight]);
+
+  // Auto-fold the Page 2 options sheet: slide it up when a light is selected
+  // (better view of the options), fold it back down when nothing is selected
+  // (thumbnails reclaim the space). The handle can override this manually.
+  useEffect(() => {
+    setOptionsSheetOpen(selectedLight > 0);
   }, [selectedLight]);
 
   // Numeric light count parsed from '구수 선택' (e.g. '500구' → 500). 0 when nothing selected.
@@ -787,9 +810,8 @@ export default function App() {
       if (!selectedLight) return;
       const lightNames: Record<number, string> = { 1: '팝팝', 2: '파스텔팝', 3: '쥬얼라이트', 4: '클러스터', 5: '좁쌀' };
       const baseName = lightNames[selectedLight] || `Light ${selectedLight}`;
-      // Cart qty = recommended SKU set count from #전구 PDF. Frozen at commit time.
-      // Falls back to 1 when no recommendation is on file (e.g. an unmapped size/wrap combo).
-      const setCount = getCartSetCount(selectedLight, lightCount, selectedSize, lightWrapMode) || 1;
+      // Cart qty = the user-set 수량 stepper (defaults to 1; the 360 recommendation
+      // buttons sync it to getCartSetCount when clicked). Frozen at commit time.
       candidate = {
         uid: nextUid(),
         kind: 'light',
@@ -800,7 +822,7 @@ export default function App() {
         palette: lightColors,
         name: `${baseName} ${lightQuantity} ${lightBulbColor}`,
         thumbnail: getLightThumbnail(selectedLight),
-        qty: setCount,
+        qty: lightSetQty,
       };
     } else if (currentPage === 3) {
       if (!selectedOrnament) return;
@@ -1859,9 +1881,16 @@ export default function App() {
                  </div>
                ) : currentPage === 2 ? (
                  <div className="flex flex-col h-full min-h-0">
-                   
-                   {/* Scrollable: Tree Selector */}
-                   <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+
+                   {/* Sheet stage: thumbnails fill the whole area; the options
+                       sheet is an absolutely-positioned overlay that slides up
+                       over the lower part of the thumbnails when open, and folds
+                       down (leaving only its handle) when closed. */}
+                   <div className="relative flex-1 min-h-0 overflow-hidden">
+
+                   {/* Scrollable: Light thumbnails — fill the stage. Extra bottom
+                       padding (pb-16) keeps the last row clear of the folded handle. */}
+                   <div className="absolute inset-0 overflow-y-auto p-4 pb-16 custom-scrollbar">
                      <div className="grid grid-cols-2 gap-3">
                        {[
                          { name: '팝팝', defaultImg: '/thumbnails/lights/popop_light_warm.jpg' },
@@ -1906,12 +1935,59 @@ export default function App() {
                      </div>
                    </div>
 
-                   {/* Separator */}
-                   <div className="w-full h-px bg-slate-100 shrink-0" />
+                   {/* Options sheet — slides up over the thumbnails when open,
+                       folds down to just the handle (2.75rem) when closed. */}
+                   <div
+                     className="absolute inset-x-0 bottom-0 z-20 flex flex-col bg-gray-50 border-t border-slate-200 rounded-t-2xl shadow-[0_-6px_24px_rgba(0,0,0,0.10)] transition-transform duration-300 ease-out"
+                     style={{
+                       maxHeight: '72%',
+                       transform: optionsSheetOpen ? 'translateY(0)' : 'translateY(calc(100% - 2.75rem))',
+                     }}
+                   >
+                     {/* Handle — click to fold the sheet back down (or pull it up) */}
+                     <button
+                       onClick={() => setOptionsSheetOpen(o => !o)}
+                       className="shrink-0 h-11 w-full flex flex-col items-center justify-center gap-1 rounded-t-2xl hover:bg-slate-100/70 transition-colors cursor-pointer group"
+                       aria-label={optionsSheetOpen ? '옵션 접기' : '옵션 펼치기'}
+                     >
+                       <div className="w-10 h-1.5 rounded-full bg-slate-300 group-hover:bg-slate-400 transition-colors" />
+                       <span className="flex items-center gap-0.5 text-[11px] font-semibold text-slate-400 group-hover:text-slate-600 transition-colors">
+                         {optionsSheetOpen
+                           ? <>옵션 접기 <ChevronDown className="size-3" /></>
+                           : <>옵션 펼치기 <ChevronUp className="size-3" /></>}
+                       </span>
+                     </button>
 
-                   {/* Fixed Bottom Section: Colors, Sizes, Buttons */}
-                   <div className="shrink-0 max-h-[20vh] overflow-y-auto custom-scrollbar p-4 bg-gray-50/50 flex flex-col gap-5">
-                     
+                     {/* Scrollable options body */}
+                     <div className="min-h-0 overflow-y-auto custom-scrollbar px-4 pb-4 flex flex-col gap-5">
+
+                     {/* 수량 선택 — number of SKU sets to purchase. Defaults to 1;
+                         syncs to the recommended set count when a 360 button is clicked. */}
+                     {selectedLight > 0 && (
+                       <div className="space-y-2.5">
+                         <h4 className="text-sm font-bold text-slate-600 flex items-center gap-1.5">
+                           <Gem className="size-4" /> 수량 선택
+                         </h4>
+                         <div className="flex items-center justify-center gap-0">
+                           <button
+                             onClick={() => setLightSetQty(Math.max(1, lightSetQty - 1))}
+                             className="w-10 h-10 rounded-l-lg border-2 border-r-0 border-slate-200 bg-white text-slate-600 font-bold text-lg hover:bg-slate-50 transition-colors flex items-center justify-center"
+                           >
+                             −
+                           </button>
+                           <div className="w-14 h-10 border-2 border-slate-200 bg-white flex items-center justify-center text-sm font-bold text-slate-800">
+                             {lightSetQty}
+                           </div>
+                           <button
+                             onClick={() => setLightSetQty(lightSetQty + 1)}
+                             className="w-10 h-10 rounded-r-lg border-2 border-l-0 border-slate-200 bg-white text-slate-600 font-bold text-lg hover:bg-slate-50 transition-colors flex items-center justify-center"
+                           >
+                             +
+                           </button>
+                         </div>
+                       </div>
+                     )}
+
                      {/* Light Wrap Mode — recommendation-driven.
                          Buttons shown depend on the selected light's FAMILY:
                            - wire (팝팝/파스텔팝/좁쌀): front=[앞면], 360=[360도, 360도 촘촘]
@@ -1954,7 +2030,14 @@ export default function App() {
                                  <Tooltip.Root key={key} delayDuration={300}>
                                    <Tooltip.Trigger asChild>
                                      <button
-                                       onClick={() => setLightWrapMode(key)}
+                                       onClick={() => {
+                                         // Still drives the 3D scatter (wrap mode)...
+                                         setLightWrapMode(key);
+                                         // ...and additionally syncs the qty stepper to the
+                                         // recommended purchase set count for this wrap.
+                                         const rec = getCartSetCount(selectedLight, lightCount, selectedSize, key);
+                                         if (rec) setLightSetQty(rec);
+                                       }}
                                        className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-white ${
                                          isActive
                                            ? 'border-2 border-blue-500 shadow-sm'
@@ -2042,7 +2125,13 @@ export default function App() {
                        </div>
                      )}
 
+                     </div>
+                     {/* /options body */}
                    </div>
+                   {/* /options sheet */}
+
+                   </div>
+                   {/* /sheet stage */}
 
                    {/* Footer Actions (always visible) */}
                    <div className="shrink-0 p-4 bg-gray-50/50 flex flex-col gap-3 border-t border-slate-100">

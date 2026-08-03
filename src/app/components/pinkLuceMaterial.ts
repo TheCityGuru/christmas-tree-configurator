@@ -22,12 +22,21 @@ export type PinkLuceModel =
 
 // per-model physical overrides. Smooth thick volumes need a larger `thickness`
 // so refraction reads as solid crystal instead of chrome (PM-approved).
-const OVERRIDES: Partial<Record<PinkLuceModel, { thickness?: number; transmission?: number }>> = {
+const OVERRIDES: Record<string, { thickness?: number; transmission?: number }> = {
   unicorn: { thickness: 1.4 },
   // opaque models: disable transmission entirely (visually identical to the
   // all-black transmission map, but skips the costly transmission pass).
   white_glitter_ball_L: { transmission: 0 },
   white_glitter_ball_S: { transmission: 0 },
+};
+
+// Per-model glint window (uGlintSharp). Lower value = wider (1 - uGlintSharp)
+// window = more dots firing at once. The balls run wider for ~2x visible
+// sparkle (PM-approved) at the SAME brightness (uSparkleIntensity stays 4.5).
+// The 11 crystal models keep the approved default 0.982.
+const GLINT_SHARP: Record<string, number> = {
+  white_glitter_ball_L: 0.964,
+  white_glitter_ball_S: 0.964,
 };
 
 export interface SparkleCrystal {
@@ -77,9 +86,15 @@ const sparkleBlock = (emissiveScaleExpr: string) => `#include <emissivemap_fragm
 
 export function makeSparkleCrystal(
   renderer: THREE.WebGLRenderer,
-  { model, sunWorldDir = new THREE.Vector3(4, 6, 3).normalize(), basePath = '' }:
-    { model: PinkLuceModel; sunWorldDir?: THREE.Vector3; basePath?: string },
+  { model, sunWorldDir = new THREE.Vector3(4, 6, 3).normalize(), basePath = '', overrideKey }:
+    { model: string; sunWorldDir?: THREE.Vector3; basePath?: string; overrideKey?: string },
 ): SparkleCrystal {
+  // `model` names the texture files ({basePath}{model}_*.png). The per-model
+  // tuning tables (OVERRIDES / GLINT_SHARP) are looked up by `overrideKey` so
+  // sets that share a model NAME but live in different dirs (e.g. snow vs ice,
+  // both with 'Bead_Tassel') never inherit each other's tuning. Callers pass a
+  // set-scoped key like 'ice:Bead_Tassel'; defaults to `model` for legacy sets.
+  const tuneKey = overrideKey ?? model;
   const tl = new THREE.TextureLoader();
   const textures: THREE.Texture[] = [];
   const load = (name: string, srgb = false) => {
@@ -113,14 +128,14 @@ export function makeSparkleCrystal(
     iridescence: 1.0, iridescenceMap: load('iridescence'),
     iridescenceIOR: 1.3, iridescenceThicknessRange: [150, 450],
     envMapIntensity: 1.2,
-    ...(OVERRIDES[model] || {}),
+    ...(OVERRIDES[tuneKey] || {}),
   });
 
   const sparkleUniforms: Record<string, { value: unknown }> = {
     uGlitterMask:      { value: glitterMask },
     uDotData:          { value: dotData },
     uSparkleIntensity: { value: 4.5 },    // HDR glint brightness (feeds bloom)
-    uGlintSharp:       { value: 0.982 },  // higher = rarer/smaller flashes
+    uGlintSharp:       { value: GLINT_SHARP[tuneKey] ?? 0.982 }, // higher = rarer/smaller flashes
     uTiltAmp:          { value: 1.1 },    // per-dot tilt spread
     uSunDirView:       { value: new THREE.Vector3(0, 0, 1) },
   };

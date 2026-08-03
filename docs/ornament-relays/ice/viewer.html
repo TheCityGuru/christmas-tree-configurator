@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Carousel — sparkle shader preview (Plan B)</title>
+<style>
+  html,body{margin:0;height:100%;background:#d8d8dc;overflow:hidden;font-family:system-ui}
+  #hud{position:fixed;left:12px;top:12px;color:#444;font-size:12px;line-height:1.5;
+       background:rgba(255,255,255,.55);padding:8px 10px;border-radius:8px}
+  #hud b{color:#d4699d}
+</style>
+</head>
+<body>
+<div id="hud"><span id="hudname">carousel</span> — static object, <b>camera orbits</b><br>
+open other models with <b>?model=dress</b> etc.<br>
+<b>R</b>: orbit · <b>1/2</b>: sparkle · <b>3/4</b>: glint window · <b>5/6</b>: bloom</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xd8d8dc);
+const pmrem = new THREE.PMREMGenerator(renderer);
+new RGBELoader()
+  .setPath('https://unpkg.com/three@0.160.0/examples/textures/equirectangular/')
+  .load('royal_esplanade_1k.hdr',
+    (hdr) => { scene.environment = pmrem.fromEquirectangular(hdr).texture; hdr.dispose(); },
+    undefined,
+    ()   => { scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; });
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 100);
+camera.position.set(0, 0.5, 3);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.autoRotate = true;          // CAMERA orbits a STATIC object (production scenario)
+controls.autoRotateSpeed = 2.0;
+
+// bloom: only sparkle-hot pixels (threshold) get a soft camera-like halo
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.3, 2.0);
+// threshold 2.0: glass specular (~1-2 HDR) stays below; only the sparkle
+// (intensity 4.5) crosses -> bloom is confined to the pink/green dots
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// calm lights: no facet-flash sun; sparkle comes from the shader
+const key  = new THREE.DirectionalLight(0xffffff, 1.0); key.position.set(3,4,2);  scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(-3,1,-2); scene.add(fill);
+const sunWorldDir = new THREE.Vector3(4,6,3).normalize();   // used by the shader
+
+// ---- model selection: ?model=dress (default carousel keeps legacy names) ----
+const MODEL = new URLSearchParams(location.search).get('model') || 'carousel';
+document.getElementById('hudname').textContent = MODEL;
+const TEX = {                       // uniform naming for all 11 models
+  base:`${MODEL}_basecolor.png`, mr:`${MODEL}_metalRough.png`,
+  normal:`${MODEL}_normal.png`, trans:`${MODEL}_transmission.png`,
+  irid:`${MODEL}_iridescence.png`, mask:`${MODEL}_glittermask.png`,
+  dots:`${MODEL}_dotdata.png`,
+};
+
+// per-model material overrides (smooth volumes need thicker refraction
+// to read as solid crystal instead of chrome)
+const OVERRIDES = {
+  unicorn: { thickness: 1.4 },
+  // opaque models: disable transmission entirely (visually identical to the
+  // all-black transmission map, but skips the costly transmission pass)
+  white_glitter_ball_L: { transmission: 0 },
+  white_glitter_ball_S: { transmission: 0 },
+};
+
+// ---- base material: clean pink-pearl crystal --------------------------------
+const tl = new THREE.TextureLoader();
+const load = (u, srgb=false) => { const t=tl.load(u); t.flipY=false;
+  t.colorSpace = srgb?THREE.SRGBColorSpace:THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;   // some models tile their UVs
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t; };
+const mrMap = load(TEX.mr);
+const glass = new THREE.MeshPhysicalMaterial({
+  map: load(TEX.base, true),
+  metalnessMap: mrMap, metalness:1.0,
+  roughnessMap: mrMap, roughness:1.0,
+  normalMap: load(TEX.normal),
+  transmission:1.0, transmissionMap: load(TEX.trans),
+  ior:1.4, thickness:0.35, transparent:true, side:THREE.DoubleSide,
+  iridescence:1.0, iridescenceMap: load(TEX.irid),
+  iridescenceIOR:1.3, iridescenceThicknessRange:[150,450],
+  envMapIntensity:1.2,
+});
+Object.assign(glass, OVERRIDES[MODEL] || {});
+
+// ---- Plan B: procedural aurora-sparkle injection ----------------------------
+// Virtual flakes live on a UV grid (anchored to the surface). Each flake has a
+// random tilt; when view/half-vector aligns with its tilt the flake "fires" —
+// a tiny glint whose color slides along a pink<->green aurora palette with the
+// viewing angle. No baked flakes -> no dark stains; glints are additive light.
+// dot data: R/G = per-dot randoms (sparkle phase), B = green flag.
+// NEAREST filtering so a whole dot shares one value (no edge interpolation).
+const dotData = load(TEX.dots);
+dotData.minFilter = THREE.NearestFilter;
+dotData.magFilter = THREE.NearestFilter;
+dotData.generateMipmaps = false;
+const sparkleUniforms = {
+  uGlitterMask:      { value: load(TEX.mask) },
+  uDotData:          { value: dotData },
+  uSparkleIntensity: { value: 4.5 },    // glint brightness (HDR -> feeds bloom)
+  uGlintSharp:       { value: 0.982 },  // higher = rarer/smaller flashes
+  uTiltAmp:          { value: 1.1 },    // per-dot tilt spread
+  uSunDirView:       { value: new THREE.Vector3(0,0,1) },
+};
+glass.onBeforeCompile = (shader) => {
+  Object.assign(shader.uniforms, sparkleUniforms);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', `#include <common>
+      uniform sampler2D uGlitterMask;
+      uniform sampler2D uDotData;
+      uniform float uSparkleIntensity, uGlintSharp, uTiltAmp;
+      uniform vec3 uSunDirView;`)
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      #ifdef USE_MAP
+      {
+        float gmask = texture2D(uGlitterMask, vMapUv).r;
+        if (gmask > 0.15) {
+          vec3 dd = texture2D(uDotData, vMapUv).rgb;   // per-dot constants
+          vec3 fn = normalize(normal + vec3((dd.rg - 0.5) * uTiltAmp, 0.0));
+          vec3 vDir = normalize(vViewPosition);
+          vec3 h = normalize(vDir + normalize(uSunDirView));
+          float gSun  = smoothstep(uGlintSharp, 1.0, dot(fn, h));
+          float gView = smoothstep(uGlintSharp, 1.0, dot(fn, vDir));
+          float g = max(gSun, gView);   // full weight on the camera-driven term
+          // dot color kind from dotdata B: 0=pink, ~0.5=white, 1=green
+          vec3 pinkC  = vec3(1.00, 0.62, 0.86);
+          vec3 greenC = vec3(0.55, 1.00, 0.75);
+          vec3 whiteC = vec3(1.00, 0.98, 1.00);
+          vec3 c = dd.b < 0.25 ? pinkC : (dd.b > 0.75 ? greenC : whiteC);
+          totalEmissiveRadiance += c * g * uSparkleIntensity * gmask;
+        }
+      }
+      #endif`);
+};
+
+let model = null;
+window.__scene = scene;            // debug hook
+new GLTFLoader().load(`${MODEL}.glb`, (g)=>{
+  model = g.scene; window.__model = model;
+  // the body mesh is the one whose original material carries any surface
+  // texture — baseColor OR normal (glitter balls have only a normal map);
+  // the metal hanger/cap materials carry none. Name check kept as fallback.
+  model.traverse((o)=>{ if(o.isMesh && o.material &&
+    (o.material.map || o.material.normalMap || o.material.transmission > 0 ||
+     o.material.name?.startsWith('Material_0'))) o.material = glass; });
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3()).length();
+  const c = box.getCenter(new THREE.Vector3());
+  model.position.sub(c);
+  camera.position.set(0, 0, size*0.9); camera.near=size/100; camera.far=size*10; camera.updateProjectionMatrix();
+  controls.update();
+  scene.add(model);
+}, undefined, (e)=>{ document.getElementById('hud').innerHTML='Failed to load carousel.glb — run via a local server.'; console.error(e); });
+
+addEventListener('keydown', e=>{
+  const k = e.key.toLowerCase();
+  if (k==='r') controls.autoRotate = !controls.autoRotate;
+  if (k==='1') sparkleUniforms.uSparkleIntensity.value = Math.max(0.5, sparkleUniforms.uSparkleIntensity.value - 0.5);
+  if (k==='2') sparkleUniforms.uSparkleIntensity.value += 0.5;
+  if (k==='3') sparkleUniforms.uGlintSharp.value = Math.min(0.999, sparkleUniforms.uGlintSharp.value + 0.002);
+  if (k==='4') sparkleUniforms.uGlintSharp.value = Math.max(0.95, sparkleUniforms.uGlintSharp.value - 0.002);
+  if (k==='5') bloom.strength = Math.max(0, bloom.strength - 0.1);
+  if (k==='6') bloom.strength += 0.1;
+});
+addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight); });
+renderer.setAnimationLoop(()=>{
+  sparkleUniforms.uSunDirView.value.copy(sunWorldDir).transformDirection(camera.matrixWorldInverse);
+  controls.update(); composer.render();
+});
+</script>
+</body>
+</html>

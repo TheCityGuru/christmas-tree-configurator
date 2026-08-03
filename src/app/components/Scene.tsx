@@ -31,6 +31,95 @@ function pinkLuceModel(ornPath: string): PinkLuceModel | null {
   return m && PINK_LUCE_MODELS.has(m[1]) ? (m[1] as PinkLuceModel) : null;
 }
 
+// Models OUTSIDE /ornaments/pink/ that BORROW a pink-luce map set + material.
+// Keyed by exact ornament path → the pink model whose textures/params to reuse.
+// The 스노우크리스탈 white orbs reuse the white-glitter-ball look (opaque, white
+// glints) — same material, ball's maps (loaded from PINK_LUCE_BASE_PATH).
+const SPARKLE_BORROW: Record<string, PinkLuceModel> = {
+  '/models/ornaments/snow/Glittering_White_Orb_L.glb': 'white_glitter_ball_L',
+  '/models/ornaments/snow/Glittering_White_Orb_s.glb': 'white_glitter_ball_S',
+  // 디스코나잇's white orbs now use the SAME patched (optimized) GLBs as
+  // 스노우크리스탈, so they borrow the identical white-glitter-ball look. The GLB
+  // carries the look via this borrow, not a baked material — disco kept its own
+  // path (independent placement counts), so it needs its own borrow entries.
+  '/models/ornaments/disco/Glittering_White_Orb_L.glb': 'white_glitter_ball_L',
+  '/models/ornaments/disco/Glittering_White_Orb_s.glb': 'white_glitter_ball_S',
+};
+
+// snowCrystal: 11 pure clear-crystal models in the 스노우크리스탈 set. Same material
+// system, but ZERO sparkle (glittermask all-black) — so we skip the per-frame
+// updateSparkle + the sparkle-only bloom prepass (`sparkle: false` below). Their
+// materials carry NO textures, only a glTF transmission extension — matched via
+// `transmission > 0`. Maps served from the snow/ folder.
+const SNOW_CRYSTAL_BASE_PATH = '/models/ornaments/snow/';
+const SNOW_CRYSTAL_MODELS = new Set<string>([
+  'Bead_Tassel', 'Crystal_Arrowhead', 'Crystal_Deer', 'Crystal_Pendant', 'Crystal_prism',
+  'Crystal_Snowflake', 'Crystal_Snowflake_L', 'Crystal_Snowflake_S', 'Crystal_Teardrop',
+  'Faceted_Crystal', 'Twisted_Glass_Ward',
+]);
+function snowCrystalModel(ornPath: string): string | null {
+  const m = ornPath.match(/\/ornaments\/snow\/([^/]+)\.glb$/);
+  return m && SNOW_CRYSTAL_MODELS.has(m[1]) ? m[1] : null;
+}
+
+// ice — 아이스젬 set. FIVE pure clear-crystal models. Names deliberately overlap
+// snowCrystal's, but the GLBs are DIFFERENT (higher-poly "ice" cuts) and live in
+// their own dir with their own maps, so they never collide. Same as snow: ZERO
+// sparkle (glittermask all-black) → `sparkle: false` (no updateSparkle, no bloom
+// prepass). The set's 6th GLB (Silver_Mirror_Ball) is intentionally NOT listed —
+// it must keep its baked silver material, so the Set gate excludes it and it
+// never resolves to a sparkle spec (avoids loading nonexistent *_basecolor.png).
+const ICE_CRYSTAL_BASE_PATH = '/models/ornaments/ice/';
+const ICE_CRYSTAL_MODELS = new Set<string>([
+  'Bead_Tassel', 'Crystal_Pendant', 'Crystal_prism', 'Crystal_Teardrop', 'Faceted_Crystal',
+]);
+function iceCrystalModel(ornPath: string): string | null {
+  const m = ornPath.match(/\/ornaments\/ice\/([^/]+)\.glb$/);
+  return m && ICE_CRYSTAL_MODELS.has(m[1]) ? m[1] : null;
+}
+
+// discoNight — 디스코나잇 set has TWO crystal models with SPLIT (per-model) sparkle,
+// so the map value is the per-model `sparkle` flag rather than mere membership:
+//   Crystal_Fairy    → sparkle ON  (pink/mint glitter, mask-driven, wings only)
+//   Crystal_Reindeer → sparkle OFF (pure clear crystal, like snow/ice)
+// The set's other GLBs (tinsel/disco balls, bells, etc.) are NOT crystals and are
+// excluded by the Record key check → they keep their baked materials. The disco
+// white orbs are handled earlier via SPARKLE_BORROW, so they never reach here.
+const DISCO_CRYSTAL_BASE_PATH = '/models/ornaments/disco/';
+const DISCO_CRYSTAL_MODELS: Record<string, boolean> = {
+  Crystal_Fairy: true,
+  Crystal_Reindeer: false,
+};
+function discoCrystalModel(ornPath: string): { model: string; sparkle: boolean } | null {
+  const m = ornPath.match(/\/ornaments\/disco\/([^/]+)\.glb$/);
+  return m && m[1] in DISCO_CRYSTAL_MODELS
+    ? { model: m[1], sparkle: DISCO_CRYSTAL_MODELS[m[1]] }
+    : null;
+}
+
+// `overrideKey` is the SET-SCOPED lookup key for the factory's per-model tuning
+// tables (OVERRIDES/GLINT_SHARP). Model names alone collide across sets (snow vs
+// ice both have 'Bead_Tassel'); qualifying by set keeps tuning independent even
+// though the two sets look identical today. Omitted → factory falls back to the
+// bare model name (legacy pink/borrow behavior, unchanged).
+interface SparkleSpec { textureModel: string; basePath: string; sparkle: boolean; overrideKey?: string; }
+/** Resolve the sparkle-crystal spec for an ornament path, or null if not a
+ *  sparkle model. Pink-luce models use their own maps; borrowers reuse another
+ *  model's maps; snowCrystal reuses the material with sparkle machinery off. */
+function sparkleSpecFor(ornPath: string): SparkleSpec | null {
+  const pl = pinkLuceModel(ornPath);
+  if (pl) return { textureModel: pl, basePath: PINK_LUCE_BASE_PATH, sparkle: true };
+  const borrow = SPARKLE_BORROW[ornPath];
+  if (borrow) return { textureModel: borrow, basePath: PINK_LUCE_BASE_PATH, sparkle: true };
+  const sc = snowCrystalModel(ornPath);
+  if (sc) return { textureModel: sc, basePath: SNOW_CRYSTAL_BASE_PATH, sparkle: false, overrideKey: `snow:${sc}` };
+  const ic = iceCrystalModel(ornPath);
+  if (ic) return { textureModel: ic, basePath: ICE_CRYSTAL_BASE_PATH, sparkle: false, overrideKey: `ice:${ic}` };
+  const dc = discoCrystalModel(ornPath);
+  if (dc) return { textureModel: dc.model, basePath: DISCO_CRYSTAL_BASE_PATH, sparkle: dc.sparkle, overrideKey: `disco:${dc.model}` };
+  return null;
+}
+
 // ---------- Types ----------
 export interface PlacementEntry {
   ornamentPath: string;
@@ -1749,11 +1838,20 @@ export default function Scene({
         treeLightGroupsRef.current.push(mesh as unknown as THREE.InstancedMesh);
       });
 
+      // sketchTree family: the authored cluster GLB is oriented 90° off from the
+      // front hemisphere (z >= 0) that front-only ornaments + scatter lights use,
+      // so in 앞면 mode the lit clusters don't overlap the decorated front. Spin
+      // the whole cluster model 90° clockwise (top-down) about Y to realign. In
+      // 360 mode the clusters wrap fully around, so this rotation is invisible.
+      if (treeModelPath?.includes('sketchTree')) {
+        clusterModel.rotation.y = -Math.PI / 2; // 90° CW about +Y (flip sign if mirrored)
+      }
+
       treeGroup.add(clusterModel);
       clusterModelRef.current = clusterModel;
     });
     return () => { cancelled = true; };
-  }, [treeReady, clusterGlbPath, lightLayers]);
+  }, [treeReady, clusterGlbPath, lightLayers, treeModelPath]);
 
   // ---- Per-slot tree material coloring ----
   // Single source of truth for tree colors. Runs on every slot/color/load change and rebuilds
@@ -2129,7 +2227,7 @@ export default function Scene({
           || ornPath.includes('ribon_custom_material')
           || ornPath.includes('Silver_Ornament_Ball_')
           || ornPath.endsWith('/ornaments/angelina/bead.glb');
-        const plModel = pinkLuceModel(ornPath); // non-null → sparkle-crystal family
+        const sparkleSpec = sparkleSpecFor(ornPath); // non-null → sparkle-crystal family
         const strOffset = stringOffsetByPath.get(ornPath) || new THREE.Vector3();
         const count = pathPlacements.length;
 
@@ -2151,25 +2249,30 @@ export default function Scene({
             srcMesh.geometry.computeVertexNormals();
           }
           let material: THREE.Material;
-          // Pink-luce crystal child = the textured body mesh. Crystals carry a
-          // basecolor `map`; the opaque glitter balls carry only a `normalMap`.
-          // Match by EITHER texture — never by material name (names are unreliable).
-          // Cap/hanger meshes carry neither and keep their (silver) originals.
+          // Sparkle-crystal body mesh. Pink crystals carry a basecolor `map`; the
+          // opaque glitter balls carry only a `normalMap`; the snowCrystal clear
+          // crystals carry NEITHER — only a glTF transmission extension. Match by
+          // any of the three — never by material name (names are unreliable).
+          // Cap/hanger meshes carry none of them and keep their (silver) originals.
           let crystalHandle: SparkleCrystal | null = null;
           const renderer = rendererRef.current;
-          const srcMat = srcMesh.material as THREE.MeshStandardMaterial;
+          const srcMat = srcMesh.material as THREE.MeshPhysicalMaterial;
           const isCrystalChild =
-            !!plModel && !!renderer && !!(srcMat?.map || srcMat?.normalMap);
+            !!sparkleSpec && !!renderer &&
+            !!(srcMat?.map || srcMat?.normalMap || (srcMat?.transmission ?? 0) > 0);
           if (isCrystalChild) {
             const dl = dirLightRef.current;
             const sunWorldDir = dl
               ? dl.position.clone().sub(dl.target.position).normalize()
               : undefined;
             crystalHandle = makeSparkleCrystal(renderer!, {
-              model: plModel!, sunWorldDir, basePath: PINK_LUCE_BASE_PATH,
+              model: sparkleSpec!.textureModel, sunWorldDir, basePath: sparkleSpec!.basePath,
+              overrideKey: sparkleSpec!.overrideKey,
             });
             pinkLuceHandlesRef.current.push(crystalHandle);
-            sparkleUpdatersRef.current.push(crystalHandle.updateSparkle);
+            // snowCrystal's glitter mask is all-black → sparkle term is always 0;
+            // skip its per-frame updateSparkle (relay perf note).
+            if (sparkleSpec!.sparkle) sparkleUpdatersRef.current.push(crystalHandle.updateSparkle);
             material = crystalHandle.material;
           } else if (keepOriginalMaterial) {
             material = (srcMesh.material as THREE.Material).clone();
@@ -2179,8 +2282,9 @@ export default function Scene({
           }
 
           const instMesh = new THREE.InstancedMesh(srcMesh.geometry, material, count);
-          if (crystalHandle) {
-            // Bloom prepass swaps to this variant so only glints halo.
+          if (crystalHandle && sparkleSpec!.sparkle) {
+            // Bloom prepass swaps to this variant so only glints halo. Skipped for
+            // snowCrystal (no glints) → it gets the standard darken prepass.
             instMesh.userData.pinkLuceBloomMat = crystalHandle.bloomMaterial;
           }
           instMesh.castShadow = false;
