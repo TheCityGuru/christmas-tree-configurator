@@ -308,10 +308,10 @@ const CLIENT_WHITE = '#ffffff';
 const CLIENT_TREE_COLORS: Record<number, Record<string, string>> = {
   1: { 'Material.001': '#11330a', 'Material.003': '#22401c' },                                    // 피시본 그린
   2: { 'Material.001': '#23330a', 'Material.003': '#143211', 'Material.005': '#526430' },         // 피시본 투톤
-  4: { 'Material': '#557d40', 'Material.006': '#2a451c', 'Material.004': CLIENT_DEEP_GREEN, 'Material.005': CLIENT_DEEP_GREEN }, // 스케치 올리브
+  4: { 'Material': '#4E7132', 'Material.006': '#394F26', 'Material.003': '#213B0C', 'Material.004': CLIENT_DEEP_GREEN, 'Material.005': CLIENT_DEEP_GREEN }, // 스케치 올리브
   5: { '*': CLIENT_WHITE },                                                                        // 스케치 스노우 (material 전체 + 받침대 white)
-  6: { 'Material': '#f01414', 'Material.006': '#b90404', 'Material.003': '#580909', 'Material.004': CLIENT_DEEP_GREEN, 'Material.005': CLIENT_DEEP_GREEN }, // 스케치 로즈
-  7: { 'Material': '#fe90a4', 'Material.006': '#f7738b', 'Material.004': CLIENT_WHITE, 'Material.005': CLIENT_WHITE },           // 스케치 핑크
+  6: { 'Material': '#f01414', 'Material.006': '#b90404', 'Material.003': '#800000', 'Material.004': CLIENT_DEEP_GREEN, 'Material.005': CLIENT_DEEP_GREEN }, // 스케치 로즈
+  7: { 'Material': '#FF9EBB', 'Material.006': '#FF9EBB', 'Material.003': '#CC7B93', 'Material.004': CLIENT_WHITE, 'Material.005': CLIENT_WHITE },           // 스케치 핑크
 };
 const normMatName = (n: string) => (n || '').replace(/\./g, '').toLowerCase();
 
