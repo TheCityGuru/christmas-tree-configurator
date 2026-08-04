@@ -912,7 +912,7 @@ export default function App() {
     '2-180cm-twotone': '/models/trees/fishboneTree_twotone180.glb',
     '2-210cm-twotone': '/models/trees/fishboneTree_twotone210.glb',
     '3-180cm-none':    '/models/trees/theFirstTree_test_v4.glb',
-    '3-210cm-none':    '/models/trees/theFirstTree_210.glb',
+    '3-210cm-none':    '/models/trees/theFirstTree_210_v2.glb',
     '4-120cm-olive':   '/models/trees/sketchTree_v3_olive120.glb',
     '4-150cm-olive':   '/models/trees/sketchTree_v3_olive150.glb',
     '4-180cm-olive':   '/models/trees/sketchTree_v3_olive180.glb',
