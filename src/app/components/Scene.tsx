@@ -1575,10 +1575,13 @@ export default function Scene({
     // producing a hollowed-cone-shell distribution (dense on the outer envelope, empty
     // inside). Applied uniformly per user request 2026-07-13.
     const TUNING: ScatterTuning = isUltimate
-      // baseR 1.45 × maxR pushes lights to the visible foliage edge. Was 1.30; bumped to
-      // sit further outward per user feedback. Per-sample rMaxKeep loosened to 1.75 to
-      // ensure even the widest vertex picks remain inside the silhouette after push.
-      ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.45, tipRPct: 0.32, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.75, depthMin: 0.65 }
+      // Fishbone radial tuning (2026-08-05, option B v2). v1 (baseRPct 1.25 / depthMin 0.40)
+      // pulled bulbs into a dark-cored central column, so push OUTWARD harder: baseRPct 1.55
+      // (> original 1.45) drives inner samples out to the visible foliage envelope, depthMin
+      // 0.55 keeps them in the outer band so they actually reach the surface, and the raised
+      // JITTER (below) + area-weighted sampling (A) keep the spread even instead of patterned.
+      // B v3 (2026-08-05): baseRPct 1.55 → 1.40 pulls the base radius in a little; jitter 2×.
+      ? { yBasePct: 0.20, yTipPct: 0.95, baseRPct: 1.40, tipRPct: 0.38, yMinKeepPct: 0.05, yMaxKeepPct: 1.00, rMaxKeepPct: 1.85, depthMin: 0.55 }
       : isTheFirstTree
         // theFirstTree: `branch`/`foliage` clusters both host bulbs. Split the difference
         // from the prior swing — yMinKeep 0.08 (was 0.11 → skirt starved) restores bottom
@@ -1639,7 +1642,9 @@ export default function Scene({
     const rMaxKeep   = maxR * TUNING.rMaxKeepPct;
     // Jitter ~3% of maxR keeps the per-bulb perturbation visually consistent across sizes
     // (ultimate@150 used 0.015 ≈ 3% × ~0.5 maxR; sketch was already 2.5%).
-    const JITTER     = maxR * (isSketch ? 0.025 : 0.030);
+    // Fishbone jitter 0.2 (B v4) to scatter bulbs hard and blur the residual per-frond fans
+    // left by the identical repeated frond geometry (2026-08-05). Others unchanged.
+    const JITTER     = maxR * (isSketch ? 0.025 : isUltimate ? 0.2 : 0.030);
 
     console.info(`[${isUltimate ? 'fishbone' : 'sketch'} lights] bounds:`, { fullHeight, maxR, Y_BASE, Y_TIP, BASE_R, TIP_R, clusters: clusters.length });
 
@@ -1662,7 +1667,54 @@ export default function Scene({
     const tmpPerp = new THREE.Vector3();
     const tmpUp = new THREE.Vector3(0, 1, 0);
 
-    // Per-layer scatter: vertex pick → radial push → jitter → optional front-only filter.
+    // ---- Area-weighted surface sampler (fishbone only) ----
+    // Fishbone foliage is ~23 instances of ONE identical 5876-vert frond whose vertices
+    // bunch toward the tip; uniform *vertex* picking therefore oversamples tips and the
+    // identical geometry makes the bias repeat per frond → a visible pattern. Sampling a
+    // random point on an *area-weighted* triangle instead gives a uniform surface spread,
+    // independent of tessellation density. Cached per BufferGeometry (fronds share geo).
+    const _sa = new THREE.Vector3(), _sb = new THREE.Vector3(), _sc = new THREE.Vector3();
+    const _sab = new THREE.Vector3(), _sac = new THREE.Vector3(), _scr = new THREE.Vector3();
+    type AreaSampler = { pos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute; gi: (i: number) => number; cum: Float64Array; triCount: number; total: number };
+    const areaSamplerCache = new Map<string, AreaSampler>();
+    const getAreaSampler = (geom: THREE.BufferGeometry): AreaSampler | null => {
+      const cached = areaSamplerCache.get(geom.uuid);
+      if (cached) return cached;
+      const pos = geom.attributes.position as THREE.BufferAttribute;
+      if (!pos) return null;
+      const index = geom.index;
+      const gi = index ? (i: number) => index.getX(i) : (i: number) => i;
+      const triCount = (index ? index.count : pos.count) / 3 | 0;
+      const cum = new Float64Array(triCount);
+      let acc = 0;
+      for (let t = 0; t < triCount; t++) {
+        _sa.fromBufferAttribute(pos, gi(3 * t));
+        _sb.fromBufferAttribute(pos, gi(3 * t + 1));
+        _sc.fromBufferAttribute(pos, gi(3 * t + 2));
+        _sab.subVectors(_sb, _sa); _sac.subVectors(_sc, _sa);
+        acc += 0.5 * _scr.crossVectors(_sab, _sac).length();
+        cum[t] = acc;
+      }
+      const sampler: AreaSampler = { pos, gi, cum, triCount, total: acc };
+      areaSamplerCache.set(geom.uuid, sampler);
+      return sampler;
+    };
+    // Write a uniform-random surface point (geometry-local space) into `out`.
+    const sampleSurface = (s: AreaSampler, out: THREE.Vector3): THREE.Vector3 => {
+      const r = Math.random() * s.total;
+      let lo = 0, hi = s.triCount - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (s.cum[mid] < r) lo = mid + 1; else hi = mid; }
+      _sa.fromBufferAttribute(s.pos, s.gi(3 * lo));
+      _sb.fromBufferAttribute(s.pos, s.gi(3 * lo + 1));
+      _sc.fromBufferAttribute(s.pos, s.gi(3 * lo + 2));
+      let u = Math.random(), v = Math.random();
+      if (u + v > 1) { u = 1 - u; v = 1 - v; }
+      return out.copy(_sa)
+        .addScaledVector(_sab.subVectors(_sb, _sa), u)
+        .addScaledVector(_sac.subVectors(_sc, _sa), v);
+    };
+
+    // Per-layer scatter: surface/vertex pick → radial push → jitter → optional front-only filter.
     // Each call produces a fresh batch of `targetCount` positions independent of prior layers.
     const scatterPositions = (targetCount: number): THREE.Vector3[] => {
       const positions: THREE.Vector3[] = [];
@@ -1670,6 +1722,9 @@ export default function Scene({
         const g = child.geometry;
         const posAttr = g.attributes.position;
         if (!posAttr) continue;
+        // Fishbone: uniform area-weighted surface sampling (kills tip-clustering pattern).
+        // Sketch / theFirstTree: unchanged uniform-vertex pick (their look is separately tuned).
+        const sampler = isUltimate ? getAreaSampler(g) : null;
         const toModel = new THREE.Matrix4().multiplyMatrices(modelInverse, child.matrixWorld);
         const pivot = new THREE.Vector3();
         const parent = child.parent;
@@ -1678,8 +1733,13 @@ export default function Scene({
         }
         const vCount = posAttr.count;
         for (let i = 0; i < PER_BRANCH; i++) {
-          const idx = Math.floor(Math.random() * vCount);
-          tmpV.fromBufferAttribute(posAttr, idx).applyMatrix4(toModel);
+          if (sampler) {
+            sampleSurface(sampler, tmpV);
+          } else {
+            const idx = Math.floor(Math.random() * vCount);
+            tmpV.fromBufferAttribute(posAttr, idx);
+          }
+          tmpV.applyMatrix4(toModel);
           const vertex = tmpV.clone();
           const curR = Math.hypot(vertex.x, vertex.z);
           // Per-sample acceptance guards — applied uniformly across both families now that

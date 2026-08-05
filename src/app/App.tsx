@@ -44,13 +44,13 @@ const ORNAMENT_SET_1: OrnamentSet = [
 
 // 겨울숲 20pcs — 7 GLBs summing to exactly 20 pieces. WebP textures; 7.glb also Meshopt-compressed (~15 MB total on disk).
 const ORNAMENT_SET_4: OrnamentSet = [
-  { path: '/models/ornaments/winter_forrest/1.glb', qty: 4 },
-  { path: '/models/ornaments/winter_forrest/2.glb', qty: 2 },
-  { path: '/models/ornaments/winter_forrest/3.glb', qty: 2 },
-  { path: '/models/ornaments/winter_forrest/4.glb', qty: 3 },
-  { path: '/models/ornaments/winter_forrest/5.glb', qty: 3 },
-  { path: '/models/ornaments/winter_forrest/6.glb', qty: 3 },
-  { path: '/models/ornaments/winter_forrest/7.glb', qty: 3 },
+  { path: '/models/ornaments/winter_forest/1.glb', qty: 4 },
+  { path: '/models/ornaments/winter_forest/2.glb', qty: 2 },
+  { path: '/models/ornaments/winter_forest/3.glb', qty: 2 },
+  { path: '/models/ornaments/winter_forest/4.glb', qty: 3 },
+  { path: '/models/ornaments/winter_forest/5.glb', qty: 3 },
+  { path: '/models/ornaments/winter_forest/6.glb', qty: 3 },
+  { path: '/models/ornaments/winter_forest/7.glb', qty: 3 },
 ];
 
 // 레인보우캔디샵 70pcs — 28 GLBs summing to 73 pieces (label ~70 nominal). WebP-compressed (~59 MB on disk).
@@ -605,6 +605,13 @@ export default function App() {
   // the value committed to the cart (the 360 buttons are now suggestions, not the
   // mandatory qty driver).
   const [lightSetQty, setLightSetQty] = useState(1);
+  // 전구 감기 옵션 selection state — DECOUPLED from lightWrapMode.
+  //   null  → no wrap button active (default). 수량 선택 stepper drives qty freely.
+  //   key   → that wrap button is active; qty is locked to its #전구 recommendation
+  //           (getCartSetCount) and the stepper is disabled until de-selected.
+  // Note lightWrapMode always holds a value (it drives scene bulb density + cluster
+  // GLB via the 앞면/360 toggle); this is purely the UI "selected + qty-lock" flag.
+  const [wrapQtyLock, setWrapQtyLock] = useState<WrapKey | null>(null);
   // Page 2 options sheet fold state. Default folded (down) so the light
   // thumbnails get maximum vertical room; auto-slides up when a light is
   // selected, and the handle folds it back down. See effect below.
@@ -692,6 +699,9 @@ export default function App() {
   //     doesn't expose a 촘촘 option (LED / cluster).
   useEffect(() => {
     const family = selectedLight > 0 ? LIGHT_FAMILY[selectedLight] : null;
+    // Context changed (different light or 앞면/360 mode) → the wrap recommendation
+    // no longer applies, so drop back to the de-selected default (qty free).
+    setWrapQtyLock(null);
     if (frontOnlyMode) {
       setLightWrapMode('front');
       return;
@@ -704,6 +714,14 @@ export default function App() {
       return next;
     });
   }, [frontOnlyMode, selectedLight]);
+
+  // While a wrap option is locked, keep the 수량 선택 value pinned to its #전구
+  // recommendation (also re-syncs if 구수/사이즈 change under the lock).
+  useEffect(() => {
+    if (!wrapQtyLock) return;
+    const rec = getCartSetCount(selectedLight, lightCount, selectedSize, wrapQtyLock);
+    if (rec) setLightSetQty(rec);
+  }, [wrapQtyLock, selectedLight, lightCount, selectedSize]);
 
   // Per-tree size + color options. Drives both the Step 1 selectors and the cart commit snapshot.
   //   sizes: string[] of cm-stripped labels (e.g. '150') — UI suffixes 'cm' for display + state
@@ -1038,8 +1056,12 @@ export default function App() {
     const layers: LightLayer[] = [];
     cartItems.forEach(item => {
       if (item.kind !== 'light') return;
-      const bulbCount = getSceneBulbCount(selectedTree, selectedSize, item.lightId, lightWrapMode);
-      if (bulbCount <= 0) return; // no #트리 data (e.g. 더퍼스트) → skip rendering
+      // Gate on #트리 data (0 for 더퍼스트 / invalid config → skip rendering)...
+      const rec = getSceneBulbCount(selectedTree, selectedSize, item.lightId, lightWrapMode);
+      if (rec <= 0) return;
+      // ...but the actual scene density REPLACES the recommendation with the true
+      // purchased bulb count: 구수(item.bulbCount) × 수량(item.qty sets).
+      const bulbCount = Math.max(1, item.bulbCount) * Math.max(1, item.qty);
       layers.push({
         layerId: `cart-${item.uid}`,
         lightId: item.lightId,
@@ -1048,18 +1070,20 @@ export default function App() {
       });
     });
     if (selectedLight > 0) {
-      const bulbCount = getSceneBulbCount(selectedTree, selectedSize, selectedLight, lightWrapMode);
-      if (bulbCount > 0) {
+      const rec = getSceneBulbCount(selectedTree, selectedSize, selectedLight, lightWrapMode);
+      if (rec > 0) {
+        // Live preview = 구수(lightCount) × 수량(lightSetQty). At the wrap-recommended
+        // qty this equals the #트리 recommendation; stepping qty scales from there.
         layers.push({
           layerId: 'preview',
           lightId: selectedLight,
-          bulbCount,
+          bulbCount: Math.max(1, lightCount) * Math.max(1, lightSetQty),
           palette: lightColors,
         });
       }
     }
     return layers;
-  }, [cartItems, selectedLight, lightColors, selectedTree, selectedSize, lightWrapMode]);
+  }, [cartItems, selectedLight, lightColors, selectedTree, selectedSize, lightWrapMode, lightSetQty, lightCount]);
 
   // Bead string is replaced by the `bead.glb` entry inside ORNAMENT_SET_1 (qty=15) which
   // routes through the normal ornament-layer pipeline. The beadStringPath prop stays wired
@@ -1961,32 +1985,43 @@ export default function App() {
                      {/* Scrollable options body */}
                      <div className="min-h-0 overflow-y-auto custom-scrollbar px-4 pb-4 flex flex-col gap-5">
 
-                     {/* 수량 선택 — number of SKU sets to purchase. Defaults to 1;
-                         syncs to the recommended set count when a 360 button is clicked. */}
-                     {selectedLight > 0 && (
+                     {/* 수량 선택 — number of SKU sets to purchase. Drives qty freely by
+                         default; while a 전구 감기 옵션 is active (wrapQtyLock !== null) the
+                         stepper is locked to that option's #전구 recommendation. */}
+                     {selectedLight > 0 && (() => {
+                       const qtyLocked = wrapQtyLock !== null;
+                       return (
                        <div className="space-y-2.5">
                          <h4 className="text-sm font-bold text-slate-600 flex items-center gap-1.5">
                            <Gem className="size-4" /> 수량 선택
                          </h4>
                          <div className="flex items-center justify-center gap-0">
                            <button
+                             disabled={qtyLocked}
                              onClick={() => setLightSetQty(Math.max(1, lightSetQty - 1))}
-                             className="w-10 h-10 rounded-l-lg border-2 border-r-0 border-slate-200 bg-white text-slate-600 font-bold text-lg hover:bg-slate-50 transition-colors flex items-center justify-center"
+                             className={`w-10 h-10 rounded-l-lg border-2 border-r-0 border-slate-200 font-bold text-lg flex items-center justify-center transition-colors ${qtyLocked ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
                            >
                              −
                            </button>
-                           <div className="w-14 h-10 border-2 border-slate-200 bg-white flex items-center justify-center text-sm font-bold text-slate-800">
+                           <div className={`w-14 h-10 border-2 border-slate-200 flex items-center justify-center text-sm font-bold ${qtyLocked ? 'bg-slate-100 text-slate-500' : 'bg-white text-slate-800'}`}>
                              {lightSetQty}
                            </div>
                            <button
+                             disabled={qtyLocked}
                              onClick={() => setLightSetQty(lightSetQty + 1)}
-                             className="w-10 h-10 rounded-r-lg border-2 border-l-0 border-slate-200 bg-white text-slate-600 font-bold text-lg hover:bg-slate-50 transition-colors flex items-center justify-center"
+                             className={`w-10 h-10 rounded-r-lg border-2 border-l-0 border-slate-200 font-bold text-lg flex items-center justify-center transition-colors ${qtyLocked ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
                            >
                              +
                            </button>
                          </div>
+                         {qtyLocked && (
+                           <p className="text-xs text-slate-400 text-center">
+                             '전구 감기 옵션'으로 수량이 설정되었습니다. 옵션을 다시 누르면 수량을 직접 조절할 수 있어요.
+                           </p>
+                         )}
                        </div>
-                     )}
+                       );
+                     })()}
 
                      {/* Light Wrap Mode — recommendation-driven.
                          Buttons shown depend on the selected light's FAMILY:
@@ -2025,18 +2060,24 @@ export default function App() {
                          return (
                            <div className={`grid ${cols} gap-2`}>
                              {items.map(({ key, label, icon: Icon }) => {
-                               const isActive = lightWrapMode === key;
+                               const isActive = wrapQtyLock === key;
                                return (
                                  <Tooltip.Root key={key} delayDuration={300}>
                                    <Tooltip.Trigger asChild>
                                      <button
                                        onClick={() => {
-                                         // Still drives the 3D scatter (wrap mode)...
-                                         setLightWrapMode(key);
-                                         // ...and additionally syncs the qty stepper to the
-                                         // recommended purchase set count for this wrap.
-                                         const rec = getCartSetCount(selectedLight, lightCount, selectedSize, key);
-                                         if (rec) setLightSetQty(rec);
+                                         if (wrapQtyLock === key) {
+                                           // De-select: qty control returns to 수량 선택 (keeps
+                                           // its value); scene density reverts to the 앞면/360 base.
+                                           setWrapQtyLock(null);
+                                           setLightWrapMode(frontOnlyMode ? 'front' : '360');
+                                         } else {
+                                           // Select: drive the 3D scatter (wrap mode) and lock the
+                                           // qty stepper to this wrap's recommendation. The pinning
+                                           // + re-sync is handled by the wrapQtyLock effect.
+                                           setWrapQtyLock(key);
+                                           setLightWrapMode(key);
+                                         }
                                        }}
                                        className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-white ${
                                          isActive
