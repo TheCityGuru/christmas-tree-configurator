@@ -6,6 +6,28 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-08-06 — Full port of boss's 전구 stepper/감기옵션 mechanism (`b9ed1ba`)
+
+Reconciles the Page-2 lights qty-stepper + 감기옵션 to boss's WinterSketch
+(`alchemist27/wintersketch`) model 1:1 — the agreed source of truth for this
+feature. Replaces the `b91b031` `구수 × 수량` scene-density model and the
+`wrapQtyLock` stepper lock. Behavior-only; no asset/UI-layout changes.
+
+- **감기옵션 (`lightWrapMode`) is now de-selectable via `null`** (default `'360'`).
+  Clicking the active wrap button toggles it off → 감기 추천 해제. LED (쥬얼라이트)
+  family can't go null (no wrap UI) — always forced to a standard wrap.
+- **수량 stepper: auto-sync + manual-latch, NO lock/disable.** `lightSetQty`
+  auto-syncs to `wrap ? getCartSetCount : 1`, re-syncs on 전구/구수/사이즈/감기옵션
+  change, until the user touches the stepper (`lightQtyTouchedRef`) → value sticks;
+  전구/사이즈/구수 change clears the latch. The stepper is always interactive.
+- **Scene density = new `resolveRenderBulbCount`** = `wrap ? getSceneBulbCount
+  (추천) : 구수`. The purchase stepper no longer drives visible bulb count.
+  Dropped the `구수 × 수량` density from `b91b031`.
+- **Preview layer skips when the selected light is already in the cart** (XOR,
+  matches boss) — prevents double-render / stale preview after removal.
+
+---
+
 ## 2026-08-03 — sketchTree pink/rose/olive material color tweaks (`81786a5`)
 
 - Updated `CLIENT_TREE_COLORS` per-material overrides for the sketch trees:
