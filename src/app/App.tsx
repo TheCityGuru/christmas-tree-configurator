@@ -371,6 +371,23 @@ function getSceneBulbCount(treeId: number, size: string, lightId: number, wrap: 
   return groupTable[size]?.[family]?.[wrap] ?? 0;
 }
 
+// 3D 씬에 렌더할 전구 개수 (boss's `resolveRenderBulbCount` mechanism, ported 1:1).
+//   - 감기옵션 선택(wrap ≠ null): 추천 씬수(getSceneBulbCount)를 그대로 사용.
+//   - 감기옵션 해제(wrap === null): 사용자가 고른 구수(qtyUnit)를 그대로 렌더(WYSIWYG).
+// 더퍼스트/데이터 없는 조합은 추천이 0이므로 0(전구 미표시)을 유지한다.
+// NOTE: 구매 스테퍼(수량)는 씬 밀도를 구동하지 않는다 — 종전 `구수 × 수량` 모델을 대체.
+function resolveRenderBulbCount(
+  treeId: number,
+  size: string,
+  lightId: number,
+  wrap: WrapKey | null,
+  qtyUnit: number,
+): number {
+  const recommended = getSceneBulbCount(treeId, size, lightId, wrap ?? '360');
+  if (recommended <= 0) return 0; // 더퍼스트/무데이터 → 전구 없음 (0 게이트 보존)
+  return wrap ? recommended : (qtyUnit > 0 ? qtyUnit : 0);
+}
+
 // #전구 PDF — sets to buy per (light, qty-per-unit, size, wrap).
 // Wire products: 3 wrap modes. LED + Cluster: collapsed (same number for all 3 wraps).
 const CART_SET_COUNT_TABLE: Record<number, Record<number, Record<string, Record<WrapKey, number>>>> = {
@@ -520,9 +537,12 @@ export default function App() {
   const cycleLightMode = () => setLightMode((prev) => prev === 'on' ? 'blink' : prev === 'blink' ? 'off' : 'on');
   const [rearrangeMode, setRearrangeMode] = useState(false);
   const [frontOnlyMode, setFrontOnlyMode] = useState(false);
-  // Light wrap mode: 'front' (앞면), '360' (360도 보통), '360-dense' (360도 촘촘)
-  // Tied to frontOnlyMode: front-only → 'front'; 360 → '360' or '360-dense' user choice
-  const [lightWrapMode, setLightWrapMode] = useState<'front' | '360' | '360-dense'>('360');
+  // Light wrap mode (감기옵션): 'front' | '360' | '360-dense' | null.
+  //   null = 해제 (감기 추천 끔) — 씬은 사용자가 고른 구수를 그대로 렌더(WYSIWYG),
+  //   카트는 "선택 구수 1세트"만 담는다. Toggled off by clicking the active wrap button.
+  //   LED(쥬얼라이트) 패밀리는 감기 UI가 없으므로 null을 허용하지 않는다(항상 '360' 등 강제).
+  //   Tied to frontOnlyMode: front-only → 'front'; 360 → '360' or '360-dense' user choice.
+  const [lightWrapMode, setLightWrapMode] = useState<WrapKey | null>('360');
   const [showRearrangeGuide, setShowRearrangeGuide] = useState(false);
   const [rearrangeGuideHideToday, setRearrangeGuideHideToday] = useState(() => {
     const stored = localStorage.getItem('rearrangeGuideHideUntil');
@@ -600,18 +620,14 @@ export default function App() {
   const [selectedPointOrnament, setSelectedPointOrnament] = useState(0);
   const [ornamentQty, setOrnamentQty] = useState(1);
   const [pointOrnamentQty, setPointOrnamentQty] = useState(1);
-  // Cart quantity (number of SKU sets) for the selected light. Defaults to 1 on
-  // light change; a 360 recommendation click syncs it to getCartSetCount. This is
-  // the value committed to the cart (the 360 buttons are now suggestions, not the
-  // mandatory qty driver).
+  // Cart quantity (number of SKU sets) for the selected light — the value committed
+  // to the cart. Boss's auto-sync + manual-latch model (ported 1:1): auto-syncs to
+  // `wrap ? getCartSetCount : 1` on light/구수/사이즈/감기옵션 change, until the user
+  // touches the stepper (lightQtyTouchedRef → true) → value sticks; light/사이즈/구수
+  // change clears the latch. NO lock/disable — the stepper is always interactive.
   const [lightSetQty, setLightSetQty] = useState(1);
-  // 전구 감기 옵션 selection state — DECOUPLED from lightWrapMode.
-  //   null  → no wrap button active (default). 수량 선택 stepper drives qty freely.
-  //   key   → that wrap button is active; qty is locked to its #전구 recommendation
-  //           (getCartSetCount) and the stepper is disabled until de-selected.
-  // Note lightWrapMode always holds a value (it drives scene bulb density + cluster
-  // GLB via the 앞면/360 toggle); this is purely the UI "selected + qty-lock" flag.
-  const [wrapQtyLock, setWrapQtyLock] = useState<WrapKey | null>(null);
+  // 현재 전구에서 사용자가 수량 스테퍼를 직접 조정했는지. true면 자동 동기화 중단.
+  const lightQtyTouchedRef = useRef(false);
   // Page 2 options sheet fold state. Default folded (down) so the light
   // thumbnails get maximum vertical room; auto-slides up when a light is
   // selected, and the handle folds it back down. See effect below.
@@ -663,9 +679,9 @@ export default function App() {
       setLightBulbColor(opts.bulbColor[0]);
       setLightWireColor(opts.wireColor[0]);
     }
-    // Quantity always resets to 1 on light change — the 360 recommendations are
-    // opt-in, so a freshly selected light starts at qty 1 until the user clicks one.
-    setLightSetQty(1);
+    // 전구가 바뀌면 수량 스테퍼는 자동 동기화 모드로 복귀 — 실제 값은 아래 auto-sync
+    // effect가 새 전구/감기옵션 기준으로 다시 계산한다.
+    lightQtyTouchedRef.current = false;
   }, [selectedLight]);
 
   // Auto-fold the Page 2 options sheet: slide it up when a light is selected
@@ -693,35 +709,50 @@ export default function App() {
     [selectedLight, lightBulbColor],
   );
 
+  // Preview 레이어의 구수 의존성: 감기 해제(null) 상태에서만 구수(lightCount)에 의존한다.
+  // 선택 상태에선 프리셋 고정이라 구수는 렌더에 무관 → lightLayers 의존성으로 이 값을 써서
+  // 감기 선택 중 구수만 바뀔 때 재산란(전구 랜덤 재배치)되는 것을 막는다.
+  const previewQtyUnit = lightWrapMode ? 0 : lightCount;
+
   // Sync light wrap mode with 장식 범위 (Step 1 selector) AND with the selected light family:
-  //   - front-only → force 'front'
-  //   - 360 mode → 'front' becomes '360'; '360-dense' demotes to '360' if the new family
-  //     doesn't expose a 촘촘 option (LED / cluster).
+  //   - front-only → force 'front' (단, 해제(null) 상태는 유지 — 감기 UI 없는 LED만 강제)
+  //   - 360 mode → 'front' becomes '360'; '360-dense' demotes to '360' for LED (no 촘촘)
+  //   - LED(쥬얼라이트)는 감기 UI가 없어 null(해제)을 허용하지 않는다 → 표준 wrap 강제.
   useEffect(() => {
     const family = selectedLight > 0 ? LIGHT_FAMILY[selectedLight] : null;
-    // Context changed (different light or 앞면/360 mode) → the wrap recommendation
-    // no longer applies, so drop back to the de-selected default (qty free).
-    setWrapQtyLock(null);
+    const noWrapUI = family === 'led';
     if (frontOnlyMode) {
-      setLightWrapMode('front');
+      setLightWrapMode((prev) => (prev === null ? (noWrapUI ? 'front' : null) : 'front'));
       return;
     }
     setLightWrapMode((prev) => {
+      if (prev === null) return noWrapUI ? '360' : null; // 감기 UI 없는 패밀리는 해제 불가 → '360'
       let next: WrapKey = prev === 'front' ? '360' : prev;
-      if (next === '360-dense' && family === 'led') {
+      if (next === '360-dense' && noWrapUI) {
         next = '360';
       }
       return next;
     });
   }, [frontOnlyMode, selectedLight]);
 
-  // While a wrap option is locked, keep the 수량 선택 value pinned to its #전구
-  // recommendation (also re-syncs if 구수/사이즈 change under the lock).
+  // 사이즈/구수가 바뀌면 추천 세트수가 달라지므로 수동 수량을 버리고 자동 동기화로 복귀.
+  // (선언 순서 중요: 아래 auto-sync effect보다 먼저 실행되어야 같은 렌더에 재동기화.)
   useEffect(() => {
-    if (!wrapQtyLock) return;
-    const rec = getCartSetCount(selectedLight, lightCount, selectedSize, wrapQtyLock);
-    if (rec) setLightSetQty(rec);
-  }, [wrapQtyLock, selectedLight, lightCount, selectedSize]);
+    lightQtyTouchedRef.current = false;
+  }, [selectedSize, lightCount]);
+
+  // 수량 스테퍼 자동 동기화: 사용자가 스테퍼를 손대기 전까지, 담기 수량을
+  // (lightWrapMode ? 추천 세트수 : 1)로 유지한다. 전구/구수/사이즈/감기옵션 변경 시 재계산.
+  // 수동 조정(touched) 후엔 개입하지 않는다.
+  useEffect(() => {
+    if (lightQtyTouchedRef.current) return;
+    if (selectedLight <= 0) { setLightSetQty(1); return; }
+    setLightSetQty(
+      lightWrapMode
+        ? getCartSetCount(selectedLight, lightCount, selectedSize, lightWrapMode) || 1
+        : 1,
+    );
+  }, [selectedLight, lightCount, selectedSize, lightWrapMode]);
 
   // Per-tree size + color options. Drives both the Step 1 selectors and the cart commit snapshot.
   //   sizes: string[] of cm-stripped labels (e.g. '150') — UI suffixes 'cm' for display + state
@@ -1054,14 +1085,14 @@ export default function App() {
       }];
     }
     const layers: LightLayer[] = [];
+    // 씬 밀도 = resolveRenderBulbCount(감기 선택 → 추천 씬수, 해제 → 선택 구수 그대로).
+    // 구매 스테퍼(수량/item.qty)는 씬 밀도를 구동하지 않는다 (boss's model, ported 1:1).
+    let selectedInCart = false;
     cartItems.forEach(item => {
       if (item.kind !== 'light') return;
-      // Gate on #트리 data (0 for 더퍼스트 / invalid config → skip rendering)...
-      const rec = getSceneBulbCount(selectedTree, selectedSize, item.lightId, lightWrapMode);
-      if (rec <= 0) return;
-      // ...but the actual scene density REPLACES the recommendation with the true
-      // purchased bulb count: 구수(item.bulbCount) × 수량(item.qty sets).
-      const bulbCount = Math.max(1, item.bulbCount) * Math.max(1, item.qty);
+      if (item.lightId === selectedLight) selectedInCart = true;
+      const bulbCount = resolveRenderBulbCount(selectedTree, selectedSize, item.lightId, lightWrapMode, item.bulbCount);
+      if (bulbCount <= 0) return;
       layers.push({
         layerId: `cart-${item.uid}`,
         lightId: item.lightId,
@@ -1069,21 +1100,16 @@ export default function App() {
         palette: item.palette,
       });
     });
-    if (selectedLight > 0) {
-      const rec = getSceneBulbCount(selectedTree, selectedSize, selectedLight, lightWrapMode);
-      if (rec > 0) {
-        // Live preview = 구수(lightCount) × 수량(lightSetQty). At the wrap-recommended
-        // qty this equals the #트리 recommendation; stepping qty scales from there.
-        layers.push({
-          layerId: 'preview',
-          lightId: selectedLight,
-          bulbCount: Math.max(1, lightCount) * Math.max(1, lightSetQty),
-          palette: lightColors,
-        });
+    // Preview layer: skip if the selected light is already in the cart (avoids double
+    // rendering / stale preview after removal — same XOR pattern as ornaments).
+    if (selectedLight > 0 && !selectedInCart) {
+      const bulbCount = resolveRenderBulbCount(selectedTree, selectedSize, selectedLight, lightWrapMode, previewQtyUnit);
+      if (bulbCount > 0) {
+        layers.push({ layerId: 'preview', lightId: selectedLight, bulbCount, palette: lightColors });
       }
     }
     return layers;
-  }, [cartItems, selectedLight, lightColors, selectedTree, selectedSize, lightWrapMode, lightSetQty, lightCount]);
+  }, [cartItems, selectedLight, lightColors, selectedTree, selectedSize, lightWrapMode, previewQtyUnit]);
 
   // Bead string is replaced by the `bead.glb` entry inside ORNAMENT_SET_1 (qty=15) which
   // routes through the normal ornament-layer pipeline. The beadStringPath prop stays wired
@@ -1149,7 +1175,7 @@ export default function App() {
               }
               treeSlot={selectedTree}
               lightMode={lightMode}
-              clusterGlbPath={getClusterGlbPath(selectedTree, selectedSize, lightWrapMode)}
+              clusterGlbPath={getClusterGlbPath(selectedTree, selectedSize, lightWrapMode ?? '360')}
               ornamentConfig={scaledOrnamentConfig}
               rearrangeMode={rearrangeMode || adminPlacementMode}
               hdriPath="/models/hdri/brown_photostudio_02_1k.exr"
@@ -1985,43 +2011,33 @@ export default function App() {
                      {/* Scrollable options body */}
                      <div className="min-h-0 overflow-y-auto custom-scrollbar px-4 pb-4 flex flex-col gap-5">
 
-                     {/* 수량 선택 — number of SKU sets to purchase. Drives qty freely by
-                         default; while a 전구 감기 옵션 is active (wrapQtyLock !== null) the
-                         stepper is locked to that option's #전구 recommendation. */}
-                     {selectedLight > 0 && (() => {
-                       const qtyLocked = wrapQtyLock !== null;
-                       return (
+                     {/* 수량 선택 — number of SKU sets to purchase. Auto-syncs to the 감기옵션
+                         recommendation until the user touches it (then the value sticks);
+                         changing 전구/사이즈/구수 clears the latch. Always interactive — NO lock. */}
+                     {selectedLight > 0 && (
                        <div className="space-y-2.5">
                          <h4 className="text-sm font-bold text-slate-600 flex items-center gap-1.5">
                            <Gem className="size-4" /> 수량 선택
                          </h4>
                          <div className="flex items-center justify-center gap-0">
                            <button
-                             disabled={qtyLocked}
-                             onClick={() => setLightSetQty(Math.max(1, lightSetQty - 1))}
-                             className={`w-10 h-10 rounded-l-lg border-2 border-r-0 border-slate-200 font-bold text-lg flex items-center justify-center transition-colors ${qtyLocked ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                             onClick={() => { lightQtyTouchedRef.current = true; setLightSetQty(Math.max(1, lightSetQty - 1)); }}
+                             className="w-10 h-10 rounded-l-lg border-2 border-r-0 border-slate-200 font-bold text-lg flex items-center justify-center transition-colors bg-white text-slate-600 hover:bg-slate-50"
                            >
                              −
                            </button>
-                           <div className={`w-14 h-10 border-2 border-slate-200 flex items-center justify-center text-sm font-bold ${qtyLocked ? 'bg-slate-100 text-slate-500' : 'bg-white text-slate-800'}`}>
+                           <div className="w-14 h-10 border-2 border-slate-200 flex items-center justify-center text-sm font-bold bg-white text-slate-800">
                              {lightSetQty}
                            </div>
                            <button
-                             disabled={qtyLocked}
-                             onClick={() => setLightSetQty(lightSetQty + 1)}
-                             className={`w-10 h-10 rounded-r-lg border-2 border-l-0 border-slate-200 font-bold text-lg flex items-center justify-center transition-colors ${qtyLocked ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                             onClick={() => { lightQtyTouchedRef.current = true; setLightSetQty(lightSetQty + 1); }}
+                             className="w-10 h-10 rounded-r-lg border-2 border-l-0 border-slate-200 font-bold text-lg flex items-center justify-center transition-colors bg-white text-slate-600 hover:bg-slate-50"
                            >
                              +
                            </button>
                          </div>
-                         {qtyLocked && (
-                           <p className="text-xs text-slate-400 text-center">
-                             '전구 감기 옵션'으로 수량이 설정되었습니다. 옵션을 다시 누르면 수량을 직접 조절할 수 있어요.
-                           </p>
-                         )}
                        </div>
-                       );
-                     })()}
+                     )}
 
                      {/* Light Wrap Mode — recommendation-driven.
                          Buttons shown depend on the selected light's FAMILY:
@@ -2060,22 +2076,22 @@ export default function App() {
                          return (
                            <div className={`grid ${cols} gap-2`}>
                              {items.map(({ key, label, icon: Icon }) => {
-                               const isActive = wrapQtyLock === key;
+                               const isActive = lightWrapMode === key;
+                               // LED(쥬얼라이트)는 감기 UI가 없지만, 안전상 해제(null) 불가 패밀리는
+                               // 토글 시에도 null로 내리지 않는다.
+                               const noWrapUI = family === 'led';
                                return (
                                  <Tooltip.Root key={key} delayDuration={300}>
                                    <Tooltip.Trigger asChild>
                                      <button
                                        onClick={() => {
-                                         if (wrapQtyLock === key) {
-                                           // De-select: qty control returns to 수량 선택 (keeps
-                                           // its value); scene density reverts to the 앞면/360 base.
-                                           setWrapQtyLock(null);
-                                           setLightWrapMode(frontOnlyMode ? 'front' : '360');
+                                         if (lightWrapMode === key && !noWrapUI) {
+                                           // De-select: 감기 추천 해제(null) → 씬은 선택 구수를
+                                           // 그대로 렌더, 수량 스테퍼는 자동 동기화가 1로 되돌린다.
+                                           setLightWrapMode(null);
                                          } else {
-                                           // Select: drive the 3D scatter (wrap mode) and lock the
-                                           // qty stepper to this wrap's recommendation. The pinning
-                                           // + re-sync is handled by the wrapQtyLock effect.
-                                           setWrapQtyLock(key);
+                                           // Select: drive the 3D scatter (wrap mode). 수량 스테퍼는
+                                           // auto-sync effect가 이 wrap의 추천 세트수로 동기화한다.
                                            setLightWrapMode(key);
                                          }
                                        }}
