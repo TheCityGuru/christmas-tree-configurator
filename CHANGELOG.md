@@ -6,6 +6,21 @@ For the v4 → v5 transition history, see `CHANGELOG_v4_to_v5.md`.
 
 ---
 
+## 2026-08-07 — 더퍼스트 트리 180cm → theFirstTree180.glb
+
+Repoints slot 3 (더퍼스트 트리) 180cm to the updated model. Same base geometry
+as `theFirstTree_test_v4.glb`, with additional `spot` objects for ornament
+placement.
+
+- **`treeVariantModels['3-180cm-none']`** and **`treeDefaultModel[3]`**:
+  `theFirstTree_test_v4.glb` → **`theFirstTree180.glb`**.
+- No Scene.tsx change: all 더퍼스트 logic gates on
+  `treeModelPath.includes('theFirstTree')`, and the 4-quadrant clone block
+  picks up the new spots via the generic `spot(.NNN)?` regex.
+- 210cm (`theFirstTree_210_v2.glb`) untouched.
+
+---
+
 ## 2026-08-06 — Full port of boss's 전구 stepper/감기옵션 mechanism (`b9ed1ba`)
 
 Reconciles the Page-2 lights qty-stepper + 감기옵션 to boss's WinterSketch

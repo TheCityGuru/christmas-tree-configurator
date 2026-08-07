@@ -960,7 +960,7 @@ export default function App() {
     '2-150cm-twotone': '/models/trees/fishboneTree_twotone150.glb',
     '2-180cm-twotone': '/models/trees/fishboneTree_twotone180.glb',
     '2-210cm-twotone': '/models/trees/fishboneTree_twotone210.glb',
-    '3-180cm-none':    '/models/trees/theFirstTree_test_v4.glb',
+    '3-180cm-none':    '/models/trees/theFirstTree180.glb',
     '3-210cm-none':    '/models/trees/theFirstTree_210_v2.glb',
     '4-120cm-olive':   '/models/trees/sketchTree_v3_olive120.glb',
     '4-150cm-olive':   '/models/trees/sketchTree_v3_olive150.glb',
@@ -988,7 +988,7 @@ export default function App() {
   const treeDefaultModel: Record<number, string> = {
     1: '/models/trees/fishboneTree_green150.glb',
     2: '/models/trees/fishboneTree_twotone150.glb',
-    3: '/models/trees/theFirstTree_test_v4.glb',
+    3: '/models/trees/theFirstTree180.glb',
     4: '/models/trees/sketchTree_v3_olive150.glb',
     5: '/models/trees/sketchTree_v3_olive150.glb',
     6: '/models/trees/sketchTree_v3_olive150.glb',
